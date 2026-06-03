@@ -67,6 +67,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <div className="flex flex-wrap gap-2">
             <Link href="/admin/crawler" className="btn-secondary">采集任务</Link>
             <Link href="/admin/ingestion" className="btn-primary">管理采集数据</Link>
+            <Link href="/admin/geocoding" className="btn-primary">地理编码中心</Link>
           </div>
         </div>
       </section>
