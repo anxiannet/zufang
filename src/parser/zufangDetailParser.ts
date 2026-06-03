@@ -19,6 +19,8 @@ const knownTags = [
   "带家具"
 ];
 
+const nextLabelPattern = /\s+(?:日期|分类|标签|地铁|价格|联系|微信|电话|私信|给作者发私信)\s*[:：]?\s*/;
+
 const noisyContainerPatterns = [
   /相关广告/,
   /相关推荐/,
@@ -119,15 +121,7 @@ function countListingLinks($: cheerio.CheerioAPI, node: cheerio.Cheerio<cheerio.
 }
 
 function extractRelevantDetailText($: cheerio.CheerioAPI): string {
-  const selectors = [
-    "article",
-    ".node-content",
-    ".post-content",
-    ".field-name-body",
-    ".content .body",
-    "main",
-    "body"
-  ];
+  const selectors = ["article", ".node-content", ".post-content", ".field-name-body", ".content .body", "main", "body"];
 
   const candidate = selectors
     .map((selector) => cleanMultilineText($(selector).first().text()))
@@ -172,9 +166,7 @@ function extractTitle($: cheerio.CheerioAPI, text: string): string | null {
 
 function extractCategory(text: string): string | null {
   const labeled = extractLabeledValue(text, "分类");
-  if (labeled) {
-    return labeled;
-  }
+  if (labeled) return labeled;
 
   const match = text.match(/(单间租房|整套租房|床位出租|房屋求租)/);
   return match?.[1] ?? null;
@@ -193,27 +185,35 @@ function extractLabeledValue(text: string, label: string): string | null {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`(?:^|\\n|\\s)${escaped}\\s*[:：]?\\s*([^\\n]+)`);
   const match = text.match(regex);
-  if (!match) {
-    return null;
-  }
+  if (!match) return null;
 
-  const value = cleanText(match[1]).replace(/^(分类|标签|地铁|价格|联系|电话)\s*/, "").trim();
+  const rawValue = match[1].split(nextLabelPattern)[0] ?? "";
+  const value = cleanText(rawValue).replace(/^(分类|标签|地铁|价格|联系|微信|电话)\s*/, "").trim();
   return value || null;
 }
 
 function extractLabeledPrice(text: string): number | null {
-  const match = text.match(/价格\s*[:：]?\s*\$?\s*([\d,]+)/);
-  return match ? Number.parseInt(match[1].replace(/,/g, ""), 10) : null;
+  const value = extractLabeledValue(text, "价格");
+  if (!value) return null;
+  const match = value.match(/\$?\s*([\d,]{3,6})/);
+  if (!match) return null;
+  const price = Number.parseInt(match[1].replace(/,/g, ""), 10);
+  return price >= 300 && price <= 20_000 ? price : null;
 }
 
 function extractMrtArea(text: string): string | null {
-  const match = text.match(/([A-Z][A-Za-z ]{2,30},\s*[\u4e00-\u9fa5]{1,8})/);
-  if (match) {
-    return cleanText(match[1]);
-  }
+  const labeled = extractLabeledValue(text, "地铁");
+  if (labeled) return normalizeMrtArea(labeled);
 
-  const cnMatch = text.match(/地铁\s*[:：]?\s*([^\n]+)/);
-  return cnMatch ? cleanText(cnMatch[1]) : null;
+  const match = text.match(/([A-Z][A-Za-z ]{2,30},\s*[\u4e00-\u9fa5]{1,8})/);
+  return match ? normalizeMrtArea(match[1]) : null;
+}
+
+function normalizeMrtArea(value: string): string {
+  return cleanText(value)
+    .replace(/\s+(?:价格|联系|微信|电话|私信).*$/i, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function extractCeaRegNo(text: string): string | null {
@@ -222,14 +222,7 @@ function extractCeaRegNo(text: string): string | null {
 }
 
 function extractBodyText($: cheerio.CheerioAPI, rawText: string): string | null {
-  const selectors = [
-    ".field-name-body",
-    ".node-content",
-    ".content .body",
-    ".post-content",
-    "article",
-    "main"
-  ];
+  const selectors = [".field-name-body", ".node-content", ".content .body", ".post-content", "article", "main"];
 
   const candidate = selectors
     .map((selector) => cleanMultilineText($(selector).first().text()))
@@ -241,30 +234,15 @@ function extractBodyText($: cheerio.CheerioAPI, rawText: string): string | null 
 }
 
 function cleanDetailLines(text: string, options: { keepStructure: boolean }): string {
-  const lines = text
-    .split(/\n+/)
-    .map((line) => cleanText(line))
-    .filter(Boolean);
-
+  const lines = text.split(/\n+/).map((line) => cleanText(line)).filter(Boolean);
   const bodyLines: string[] = [];
   let seenLikelyBody = false;
 
   for (const line of lines) {
-    if (bodyStopPatterns.some((pattern) => pattern.test(line))) {
-      break;
-    }
-
-    if (isNoiseLine(line)) {
-      continue;
-    }
-
-    if (!options.keepStructure && isStructureLine(line)) {
-      continue;
-    }
-
-    if (!seenLikelyBody && !options.keepStructure && line.length < 5) {
-      continue;
-    }
+    if (bodyStopPatterns.some((pattern) => pattern.test(line))) break;
+    if (isNoiseLine(line)) continue;
+    if (!options.keepStructure && isStructureLine(line)) continue;
+    if (!seenLikelyBody && !options.keepStructure && line.length < 5) continue;
 
     seenLikelyBody = true;
     bodyLines.push(line);
@@ -276,9 +254,7 @@ function cleanDetailLines(text: string, options: { keepStructure: boolean }): st
 function dedupeConsecutiveLines(lines: string[]): string[] {
   const result: string[] = [];
   for (const line of lines) {
-    if (result[result.length - 1] !== line) {
-      result.push(line);
-    }
+    if (result[result.length - 1] !== line) result.push(line);
   }
   return result;
 }
