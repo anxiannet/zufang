@@ -2,6 +2,7 @@ import { runZufangCrawlJob } from "@/src/crawler/crawlJobRunner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sin1";
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
