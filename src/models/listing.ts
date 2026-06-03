@@ -70,6 +70,7 @@ export type CrawlMode = "manual" | "vercel-cron";
 
 export type CrawlSummary = {
   inserted: number;
+  targetInserted: number;
   updated: number;
   skipped: number;
   errors: number;

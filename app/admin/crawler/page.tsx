@@ -10,6 +10,7 @@ type CrawlJobRow = {
   finished_at: string | null;
   summary: {
     inserted?: number;
+    targetInserted?: number;
     updated?: number;
     skipped?: number;
     errors?: number;
@@ -56,13 +57,14 @@ export default async function CrawlerAdminPage() {
 
       <section className="card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-[980px] w-full border-collapse text-left text-sm">
+          <table className="min-w-[1080px] w-full border-collapse text-left text-sm">
             <thead className="bg-gray-50 text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th className="px-4 py-3">状态</th>
                 <th className="px-4 py-3">开始时间</th>
                 <th className="px-4 py-3">结束时间</th>
                 <th className="px-4 py-3">Inserted</th>
+                <th className="px-4 py-3">Target</th>
                 <th className="px-4 py-3">Updated</th>
                 <th className="px-4 py-3">Skipped</th>
                 <th className="px-4 py-3">Errors</th>
@@ -79,6 +81,7 @@ export default async function CrawlerAdminPage() {
                   <td className="px-4 py-3 text-muted">{formatDate(job.started_at)}</td>
                   <td className="px-4 py-3 text-muted">{formatDate(job.finished_at)}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.inserted ?? 0}</td>
+                  <td className="px-4 py-3 font-semibold text-ink">{job.summary?.targetInserted ?? 50}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.updated ?? 0}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.skipped ?? 0}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.errors ?? 0}</td>

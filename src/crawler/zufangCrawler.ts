@@ -1,5 +1,4 @@
 import dayjs from "dayjs";
-import pLimit from "p-limit";
 import { markRemovedFromSource, upsertListing } from "../db/listingRepository";
 import { CrawlMode, CrawlStats, CrawlSummary, DetailListing, Listing, ListListing } from "../models/listing";
 import { config } from "../utils/config";
@@ -15,6 +14,7 @@ type CrawlOptions = {
   days: number;
   maxPages?: number;
   maxDetails?: number;
+  maxInserted?: number;
   mode?: CrawlMode;
 };
 
@@ -23,6 +23,7 @@ export async function crawlZufang(): Promise<CrawlStats> {
     days: config.crawlDays,
     maxPages: config.maxPagesPerRun,
     maxDetails: config.maxDetailsPerRun,
+    maxInserted: config.maxInsertedPerRun,
     mode: "manual"
   });
 }
@@ -32,11 +33,13 @@ export async function crawlZufangRecentListings(options: CrawlOptions): Promise<
     days: options.days,
     maxPages: options.maxPages ?? config.maxPagesPerRun,
     maxDetails: options.maxDetails ?? config.maxDetailsPerRun,
+    maxInserted: options.maxInserted ?? config.maxInsertedPerRun,
     mode: options.mode ?? "manual"
   });
 
   return {
     inserted: stats.listingsInserted,
+    targetInserted: options.maxInserted ?? config.maxInsertedPerRun,
     updated: stats.listingsUpdated,
     skipped: stats.listingsSkipped,
     errors: stats.errors,
@@ -63,16 +66,17 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
   let pageUrl: string | null = config.entryUrl;
   let page = 1;
   let detailsScheduled = 0;
-  const detailLimit = pLimit(config.detailConcurrency);
   const crawlDays = options.days;
   const maxPages = options.maxPages;
   const maxDetails = options.maxDetails;
+  const maxInserted = options.maxInserted;
 
   logger.info("crawl started", {
     mode: options.mode,
     days: crawlDays,
     max_pages: maxPages,
     max_details: maxDetails,
+    max_inserted: maxInserted,
     detail_concurrency: config.detailConcurrency
   });
 
@@ -83,7 +87,12 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
     }
 
     if (detailsScheduled >= maxDetails) {
-      stats.stopReason = `达到本次最大详情数 ${maxDetails}`;
+      stats.stopReason = `达到本次详情安全上限 ${maxDetails}`;
+      break;
+    }
+
+    if (stats.listingsInserted >= maxInserted) {
+      stats.stopReason = `达到本次新增目标 ${maxInserted}`;
       break;
     }
 
@@ -116,7 +125,7 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
       }
 
       if (detailsScheduled >= maxDetails) {
-        stats.stopReason = `达到本次最大详情数 ${maxDetails}`;
+        stats.stopReason = `达到本次详情安全上限 ${maxDetails}`;
         break;
       }
 
@@ -124,22 +133,35 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
       detailsScheduled += 1;
     }
 
-    const results = await Promise.allSettled(
-      freshListings.map((listing) =>
-        detailLimit(async () => {
-          await processDetail(listing, page, stats, crawlDays);
-        })
-      )
-    );
+    for (let index = 0; index < freshListings.length && stats.listingsInserted < maxInserted; ) {
+      const remainingInsertTarget = maxInserted - stats.listingsInserted;
+      const batchSize = Math.min(config.detailConcurrency, remainingInsertTarget);
+      const batch = freshListings.slice(index, index + batchSize);
+      index += batch.length;
 
-    for (const result of results) {
-      if (result.status === "rejected") {
-        stats.errors += 1;
-        logger.error("detail task failed", { page, reason: result.reason?.message ?? String(result.reason) });
+      const results = await Promise.allSettled(
+        batch.map((listing) => processDetail(listing, page, stats, crawlDays))
+      );
+
+      for (const result of results) {
+        if (result.status === "rejected") {
+          stats.errors += 1;
+          logger.error("detail task failed", { page, reason: result.reason?.message ?? String(result.reason) });
+        }
+      }
+
+      if (stats.listingsInserted >= maxInserted) {
+        stats.stopReason = `达到本次新增目标 ${maxInserted}`;
+        break;
       }
     }
 
     if (stats.stopReason) {
+      break;
+    }
+
+    if (stats.listingsInserted >= maxInserted) {
+      stats.stopReason = `达到本次新增目标 ${maxInserted}`;
       break;
     }
 

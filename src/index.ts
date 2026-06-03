@@ -8,6 +8,7 @@ async function main(): Promise<void> {
     days: config.crawlDays,
     maxPages: config.maxPagesPerRun,
     maxDetails: config.maxDetailsPerRun,
+    maxInserted: config.maxInsertedPerRun,
     mode: "manual"
   });
   logger.info("local crawl summary", summary);

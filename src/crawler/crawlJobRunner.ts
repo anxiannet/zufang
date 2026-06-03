@@ -40,6 +40,7 @@ export async function runZufangCrawlJob(mode: CrawlMode): Promise<CrawlJobRunRes
       days: config.crawlDays,
       maxPages: config.maxPagesPerRun,
       maxDetails: config.maxDetailsPerRun,
+      maxInserted: config.maxInsertedPerRun,
       mode
     });
     await flushLogger();

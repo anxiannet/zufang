@@ -28,7 +28,7 @@
 - 爬虫入口：`src/crawler/zufangCrawler.ts` 导出 `crawlZufangRecentListings`。
 - 本地手动测试：`npm run crawl:local`。
 
-Vercel Serverless Function 不适合长时间爬取，默认每次最多抓 5 页、50 个详情页，详情并发为 2。超过限制会停止本次任务，明天继续。
+Vercel Serverless Function 不适合长时间爬取，默认每次最多抓 5 页，成功新增 50 条符合最近 3 天条件的房源后停止；详情页处理保留 200 个安全上限，详情并发为 2。超过限制会停止本次任务，明天继续。
 
 手动触发示例：
 
@@ -63,7 +63,8 @@ CRON_SECRET=
 DATABASE_URL=
 CRAWL_DAYS=3
 MAX_PAGES_PER_RUN=5
-MAX_DETAILS_PER_RUN=50
+MAX_INSERTED_PER_RUN=50
+MAX_DETAILS_PER_RUN=200
 DETAIL_CONCURRENCY=2
 ```
 

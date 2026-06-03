@@ -7,7 +7,8 @@ export const config = {
   supabaseKey: process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   crawlDays: Number.parseInt(process.env.CRAWL_DAYS ?? "3", 10),
   maxPagesPerRun: Number.parseInt(process.env.MAX_PAGES_PER_RUN ?? "5", 10),
-  maxDetailsPerRun: Number.parseInt(process.env.MAX_DETAILS_PER_RUN ?? "50", 10),
+  maxDetailsPerRun: Number.parseInt(process.env.MAX_DETAILS_PER_RUN ?? "200", 10),
+  maxInsertedPerRun: Number.parseInt(process.env.MAX_INSERTED_PER_RUN ?? "50", 10),
   baseUrl: "https://www.zufang.sg",
   entryUrl: "https://www.zufang.sg/c31?category2_id=15",
   source: "zufang.sg",
@@ -43,6 +44,10 @@ export function validateConfig(): void {
 
   if (!Number.isFinite(config.maxDetailsPerRun) || config.maxDetailsPerRun <= 0) {
     throw new Error("MAX_DETAILS_PER_RUN must be a positive number.");
+  }
+
+  if (!Number.isFinite(config.maxInsertedPerRun) || config.maxInsertedPerRun <= 0) {
+    throw new Error("MAX_INSERTED_PER_RUN must be a positive number.");
   }
 
   if (!Number.isFinite(config.detailConcurrency) || config.detailConcurrency <= 0) {
