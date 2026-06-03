@@ -211,3 +211,76 @@ export async function getCrawlJobs() {
   if (error) throw new Error(error.message);
   return data ?? [];
 }
+
+export async function getGeocodingDashboard() {
+  await requireRole(["admin"]);
+  const supabase = await createClient();
+
+  const [totalActive, withPostal, withCoordinates, withNtuDistance, cacheRows, pendingJobs, failedJobs, recommended] = await Promise.all([
+    supabase.from("listing_indexes").select("id", { count: "exact", head: true }).eq("status", "active"),
+    supabase.from("listing_indexes").select("id", { count: "exact", head: true }).eq("status", "active").not("postal_code", "is", null),
+    supabase.from("listing_indexes").select("id", { count: "exact", head: true }).eq("status", "active").not("latitude", "is", null).not("longitude", "is", null),
+    supabase.from("listing_indexes").select("id", { count: "exact", head: true }).eq("status", "active").not("distance_to_ntu_km", "is", null),
+    supabase.from("geocoding_cache").select("postal_code,status,latitude,longitude,error_message,updated_at,address").order("updated_at", { ascending: false }).limit(200),
+    supabase.from("geocoding_jobs_pending").select("postal_code,status,listing_count,sample_title,created_at").limit(50),
+    supabase.from("geocoding_cache").select("postal_code,status,error_message,updated_at").in("status", ["failed", "not_found"]).order("updated_at", { ascending: false }).limit(50),
+    supabase
+      .from("ntu_distance_recommended_listings")
+      .select("id,title,price,postal_code,mrt_area,distance_to_ntu_km,estimated_bus_to_ntu,estimated_drive_to_ntu,travel_time_to_ntu")
+      .limit(20)
+  ]);
+
+  for (const result of [totalActive, withPostal, withCoordinates, withNtuDistance, cacheRows, pendingJobs, failedJobs, recommended]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  const cacheStatus = { pending: 0, success: 0, failed: 0, not_found: 0 };
+  for (const row of cacheRows.data ?? []) {
+    const status = row.status as keyof typeof cacheStatus;
+    if (status in cacheStatus) cacheStatus[status] += 1;
+  }
+
+  return {
+    stats: {
+      total_active: totalActive.count ?? 0,
+      with_postal_code: withPostal.count ?? 0,
+      with_coordinates: withCoordinates.count ?? 0,
+      with_ntu_distance: withNtuDistance.count ?? 0
+    },
+    cacheStatus,
+    pendingJobs: pendingJobs.data ?? [],
+    failedJobs: failedJobs.data ?? [],
+    recentCache: cacheRows.data ?? [],
+    recommended: recommended.data ?? []
+  };
+}
+
+export async function runAdminGeocodingTask(formData: FormData) {
+  await requireRole(["admin"]);
+  const supabase = await createClient();
+
+  const action = String(formData.get("action") ?? "status");
+  const limit = Number(formData.get("limit") ?? 20);
+  const postalCode = String(formData.get("postal_code") ?? "").trim();
+
+  const body: Record<string, string | number> = {
+    action,
+    limit: Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 50) : 20
+  };
+  if (postalCode) body.postal_code = postalCode;
+
+  const { data, error } = await supabase.functions.invoke("admin-geocoding", { body });
+
+  if (error) {
+    redirect(`/admin/geocoding?error=${encodeURIComponent(error.message)}&task=${encodeURIComponent(action)}`);
+  }
+
+  revalidatePath("/admin/geocoding");
+
+  const processed = typeof data?.processed_count === "number" ? `&processed=${data.processed_count}` : "";
+  const synced = typeof data?.synced_listing_count === "number" ? `&synced=${data.synced_listing_count}` : "";
+  const refreshed = typeof data?.refreshed_distance_count === "number" ? `&refreshed=${data.refreshed_distance_count}` : "";
+  const enqueued = typeof data?.enqueued === "number" ? `&enqueued=${data.enqueued}` : "";
+
+  redirect(`/admin/geocoding?success=1&task=${encodeURIComponent(action)}${processed}${synced}${refreshed}${enqueued}`);
+}
