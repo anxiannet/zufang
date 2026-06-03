@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/crawl-zufang",
+      "schedule": "15 19 * * *"
+    }
+  ]
+}

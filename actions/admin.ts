@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function publishListing(listingId: string) {
@@ -35,6 +37,49 @@ export async function unpublishListing(listingId: string) {
   revalidatePath("/rent");
 }
 
+export async function appointAdmin(formData: FormData) {
+  await requireRole(["admin"]);
+
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  if (!email) redirect("/admin?admin_error=missing_email");
+
+  const adminSupabase = createAdminClient();
+  const { data, error } = await adminSupabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (error) redirect("/admin?admin_error=auth_lookup_failed");
+
+  const user = data.users.find((item) => item.email?.toLowerCase() === email);
+  if (!user) redirect("/admin?admin_error=user_not_found");
+
+  const displayName = email
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+  const { error: profileError } = await adminSupabase.from("users_profile").upsert(
+    {
+      id: user.id,
+      auth_user_id: user.id,
+      role: "admin",
+      display_name: displayName || email,
+      preferred_language: "zh"
+    },
+    { onConflict: "auth_user_id" }
+  );
+
+  if (profileError) redirect("/admin?admin_error=profile_update_failed");
+
+  revalidatePath("/admin");
+  redirect(`/admin?admin_success=${encodeURIComponent(email)}`);
+}
+
+export async function deleteIngestionListing(listingId: string) {
+  await requireRole(["admin"]);
+  const supabase = await createClient();
+  const { error } = await supabase.from("ingestion_listings").delete().eq("id", listingId);
+  if (error) throw new Error(error.message);
+  revalidatePath("/admin/ingestion");
+}
+
 export async function getAdminDashboard() {
   const supabase = await createClient();
 
@@ -65,4 +110,104 @@ export async function getAdminDashboard() {
     enquiries: enquiries.data ?? [],
     anomalies: withImageCounts(anomalies.data ?? []).filter((listing: any) => !listing.listing_images?.length || listing.rent_amount < 400 || listing.rent_amount > 10000 || !listing.street_name)
   };
+}
+
+export type IngestionListingFilters = {
+  q?: string | string[];
+  source?: string | string[];
+  category?: string | string[];
+  mrt_area?: string | string[];
+  is_top?: string | string[];
+};
+
+export async function getIngestionListings(filters: IngestionListingFilters = {}) {
+  await requireRole(["admin"]);
+  const supabase = await createClient();
+
+  const value = (key: keyof IngestionListingFilters) => {
+    const raw = filters[key];
+    return Array.isArray(raw) ? String(raw[0] ?? "").trim() : String(raw ?? "").trim();
+  };
+
+  let query = supabase
+    .from("ingestion_listings")
+    .select("id,source,source_id,title,listing_url,category,mrt_area,price,phone,wechat,tags,posted_at,scraped_at,raw_text,is_top,created_at")
+    .order("scraped_at", { ascending: false })
+    .limit(100);
+
+  const keyword = value("q");
+  if (keyword) {
+    const escaped = keyword.replaceAll("%", "\\%").replaceAll("_", "\\_").replaceAll(",", " ");
+    query = query.or(`title.ilike.%${escaped}%,raw_text.ilike.%${escaped}%,source_id.ilike.%${escaped}%,phone.ilike.%${escaped}%,wechat.ilike.%${escaped}%`);
+  }
+
+  const source = value("source");
+  if (source) query = query.eq("source", source);
+
+  const category = value("category");
+  if (category) query = query.eq("category", category);
+
+  const mrtArea = value("mrt_area");
+  if (mrtArea) query = query.ilike("mrt_area", `%${mrtArea}%`);
+
+  if (value("is_top") === "true") query = query.eq("is_top", true);
+
+  const [listings, sources, categories, totalCount, withPriceCount, withContactCount, topCount] = await Promise.all([
+    query,
+    supabase.from("ingestion_listings").select("source").not("source", "is", null).limit(500),
+    supabase.from("ingestion_listings").select("category").not("category", "is", null).limit(500),
+    supabase.from("ingestion_listings").select("id", { count: "exact", head: true }),
+    supabase.from("ingestion_listings").select("id", { count: "exact", head: true }).not("price", "is", null),
+    supabase.from("ingestion_listings").select("id", { count: "exact", head: true }).or("phone.not.is.null,wechat.not.is.null"),
+    supabase.from("ingestion_listings").select("id", { count: "exact", head: true }).eq("is_top", true)
+  ]);
+
+  if (listings.error) throw new Error(listings.error.message);
+  if (sources.error) throw new Error(sources.error.message);
+  if (categories.error) throw new Error(categories.error.message);
+  if (totalCount.error) throw new Error(totalCount.error.message);
+  if (withPriceCount.error) throw new Error(withPriceCount.error.message);
+  if (withContactCount.error) throw new Error(withContactCount.error.message);
+  if (topCount.error) throw new Error(topCount.error.message);
+
+  const sourceOptions = [...new Set((sources.data ?? []).map((row) => row.source).filter(Boolean))].sort();
+  const categoryOptions = [...new Set((categories.data ?? []).map((row) => row.category).filter(Boolean))].sort();
+
+  return {
+    listings: listings.data ?? [],
+    sourceOptions,
+    categoryOptions,
+    stats: {
+      total: totalCount.count ?? 0,
+      with_price: withPriceCount.count ?? 0,
+      with_contact: withContactCount.count ?? 0,
+      top: topCount.count ?? 0
+    }
+  };
+}
+
+export async function getIngestionListingDetail(listingId: string) {
+  await requireRole(["admin"]);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("ingestion_listings")
+    .select("*")
+    .eq("id", listingId)
+    .single();
+
+  if (error) return null;
+  return data;
+}
+
+export async function getCrawlJobs() {
+  await requireRole(["admin"]);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("crawl_jobs")
+    .select("id,job_name,status,started_at,finished_at,summary,error")
+    .order("started_at", { ascending: false })
+    .limit(20);
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }

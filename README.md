@@ -17,6 +17,28 @@
 - Supabase Auth / PostgreSQL / Storage
 - Supabase SQL migration
 
+## Zufang 自动采集
+
+数据采集已改为网站内运行，不再依赖本机 PM2、`node-cron` 或本地 logs 定时任务。
+
+- Vercel Cron：`vercel.json` 每天 UTC `15 19 * * *` 调用 `/api/cron/crawl-zufang`，即新加坡时间 03:15。
+- Cron API：`GET /api/cron/crawl-zufang`，必须带 `Authorization: Bearer <CRON_SECRET>`。
+- 手动 API：`POST /api/admin/crawl-zufang`，同样必须带 `Authorization: Bearer <CRON_SECRET>`。
+- 后台状态页：`/admin/crawler` 显示最近 20 次 `crawl_jobs`，不在前端暴露 `CRON_SECRET`。
+- 爬虫入口：`src/crawler/zufangCrawler.ts` 导出 `crawlZufangRecentListings`。
+- 本地手动测试：`npm run crawl:local`。
+
+Vercel Serverless Function 不适合长时间爬取，默认每次最多抓 5 页、50 个详情页，详情并发为 2。超过限制会停止本次任务，明天继续。
+
+手动触发示例：
+
+```bash
+curl -X POST https://your-domain.com/api/admin/crawl-zufang \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+详情页采集会先从列表页发现房源 URL，再请求详情页解析完整字段；列表页字段以 `list_*` 保存为备用，详情页字段作为主数据。采集继续保留 `raw_html`、`raw_text`、`raw_detail_html`、`raw_detail_text`、`latest_source_snapshot`、`user_corrected_fields`、`needs_review`、`listing_change_logs`。
+
 ## 快速开始
 
 1. 安装依赖
@@ -36,17 +58,25 @@ cp .env.example .env.local
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SECRET_KEY=
+CRON_SECRET=
+DATABASE_URL=
+CRAWL_DAYS=3
+MAX_PAGES_PER_RUN=5
+MAX_DETAILS_PER_RUN=50
+DETAIL_CONCURRENCY=2
 ```
 
 3. 执行数据库迁移
 
-将 `supabase/migrations/202605230001_create_rental_mvp.sql` 放入 Supabase 项目执行，或使用 Supabase CLI：
+将 `supabase/migrations/*.sql` 放入 Supabase 项目执行，或使用 Supabase CLI：
 
 ```bash
 supabase db push
 ```
 
 迁移会创建核心表、枚举、索引、RLS policies、`listing-images` Storage bucket。
+采集相关迁移会创建 `crawl_jobs`、`crawl_logs`，并补齐 `ingestion_listings` 的详情页字段和 `listing_change_logs`。
 
 4. 启动本地开发
 

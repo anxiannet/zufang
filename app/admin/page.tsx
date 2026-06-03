@@ -1,9 +1,10 @@
-import { publishListing, rejectListing, unpublishListing, getAdminDashboard } from "@/actions/admin";
+import { appointAdmin, publishListing, rejectListing, unpublishListing, getAdminDashboard } from "@/actions/admin";
 import { getCurrentProfile } from "@/lib/auth";
 import Link from "next/link";
 
-export default async function AdminPage() {
+export default async function AdminPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const profile = await getCurrentProfile();
+  const params = await searchParams;
 
   if (!profile) {
     return (
@@ -37,6 +38,38 @@ export default async function AdminPage() {
         <h1 className="text-2xl font-bold text-ink">后台管理</h1>
         <p className="mt-2 text-sm text-muted">审核房源、查看用户和咨询记录，并发现缺图片、价格异常、地址不完整的房源。</p>
       </div>
+
+      <section className="card p-4">
+        <h2 className="font-semibold text-ink">管理员权限</h2>
+        <p className="mt-1 text-sm text-muted">输入已注册用户邮箱，将该用户设置为 admin。</p>
+        {typeof params.admin_success === "string" ? (
+          <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+            已将 {params.admin_success} 设置为管理员。
+          </div>
+        ) : null}
+        {typeof params.admin_error === "string" ? (
+          <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {adminErrorMessage(params.admin_error)}
+          </div>
+        ) : null}
+        <form action={appointAdmin} className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+          <input name="email" type="email" placeholder="user@example.com" required />
+          <button className="btn-primary" type="submit">设为管理员</button>
+        </form>
+      </section>
+
+      <section className="card p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="font-semibold text-ink">采集数据</h2>
+            <p className="mt-1 text-sm text-muted">查看抓取记录、筛选来源和区域、检查原始文本与联系方式。</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/admin/crawler" className="btn-secondary">采集任务</Link>
+            <Link href="/admin/ingestion" className="btn-primary">管理采集数据</Link>
+          </div>
+        </div>
+      </section>
 
       <section className="card p-4">
         <h2 className="mb-3 font-semibold">待审核房源</h2>
@@ -103,6 +136,17 @@ export default async function AdminPage() {
 
 function AdminShell({ children }: { children: React.ReactNode }) {
   return <div className="mx-auto max-w-6xl space-y-5 px-4 py-6">{children}</div>;
+}
+
+function adminErrorMessage(code: string) {
+  const messages: Record<string, string> = {
+    missing_email: "请输入用户邮箱。",
+    auth_lookup_failed: "查询 Auth 用户失败，请稍后重试。",
+    user_not_found: "未找到该邮箱对应的注册用户。",
+    profile_update_failed: "更新用户角色失败，请稍后重试。"
+  };
+
+  return messages[code] ?? "设置管理员失败，请稍后重试。";
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
