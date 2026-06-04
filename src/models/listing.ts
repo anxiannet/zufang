@@ -110,6 +110,7 @@ export interface IngestionListingRow {
 export interface ListingIndexRow {
   source: string;
   source_id: string;
+  clean_listing_id: string;
   title: string;
   summary: string | null;
   price: number | null;
