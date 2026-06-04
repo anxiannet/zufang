@@ -15,6 +15,16 @@ type RebuildSummary = {
   errors: number;
 };
 
+export type ListingPipelineStats = {
+  clean: number;
+  indexes: number;
+  active: number;
+  invalid: number;
+  removed: number;
+  orphanIndexes: number;
+  diff: number;
+};
+
 const BATCH_SIZE = 500;
 
 export async function rebuildListingPipeline() {
@@ -32,6 +42,62 @@ export async function rebuildListingPipeline() {
   redirect(
     `/admin/ingestion?rebuilt=1&found=${summary.found}&cleaned=${summary.cleaned}&indexed=${summary.indexed}&invalid=${summary.invalid}&errors=${summary.errors}`
   );
+}
+
+export async function getListingPipelineStats(): Promise<ListingPipelineStats> {
+  await requireRole(["admin"]);
+  const supabase = createAdminClient();
+
+  const [clean, indexes, active, invalid, removed, orphanCandidates] = await Promise.all([
+    supabase.from("listing_clean").select("id", { count: "exact", head: true }),
+    supabase.from("listing_indexes").select("id", { count: "exact", head: true }),
+    supabase.from("listing_clean").select("id", { count: "exact", head: true }).eq("status", "active"),
+    supabase.from("listing_clean").select("id", { count: "exact", head: true }).eq("status", "invalid"),
+    supabase.from("listing_clean").select("id", { count: "exact", head: true }).eq("status", "removed"),
+    supabase.from("listing_indexes").select("id,clean_listing_id").limit(1000)
+  ]);
+
+  for (const result of [clean, indexes, active, invalid, removed, orphanCandidates]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  const cleanIds = await fetchCleanIdSet(supabase);
+  const orphanIndexes = (orphanCandidates.data ?? []).filter((row: any) => !cleanIds.has(String(row.clean_listing_id))).length;
+  const cleanCount = clean.count ?? 0;
+  const indexCount = indexes.count ?? 0;
+  const invalidCount = invalid.count ?? 0;
+  const removedCount = removed.count ?? 0;
+
+  return {
+    clean: cleanCount,
+    indexes: indexCount,
+    active: active.count ?? 0,
+    invalid: invalidCount,
+    removed: removedCount,
+    orphanIndexes,
+    diff: Math.max(cleanCount - invalidCount - removedCount - indexCount, 0)
+  };
+}
+
+async function fetchCleanIdSet(supabase: ReturnType<typeof createAdminClient>): Promise<Set<string>> {
+  const ids = new Set<string>();
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("listing_clean")
+      .select("id")
+      .range(from, from + BATCH_SIZE - 1);
+
+    if (error) throw new Error(error.message);
+    if (!data?.length) break;
+
+    for (const row of data) ids.add(String(row.id));
+    if (data.length < BATCH_SIZE) break;
+    from += BATCH_SIZE;
+  }
+
+  return ids;
 }
 
 async function rebuildAllListingsFromIngestion(): Promise<RebuildSummary> {
