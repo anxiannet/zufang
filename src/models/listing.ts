@@ -62,6 +62,9 @@ export interface Listing extends DetailListing {
 }
 
 export interface CrawlStats {
+  source: string;
+  entryUrl: string;
+  targetLabel: string;
   pagesVisited: number;
   listingsParsed: number;
   detailsFetched: number;
@@ -74,6 +77,19 @@ export interface CrawlStats {
   stopReason: string | null;
 }
 
+export type CrawlTargetSummary = {
+  source: string;
+  entryUrl: string;
+  targetLabel: string;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  pagesFetched: number;
+  detailsFetched: number;
+  stoppedReason?: string;
+};
+
 export type CrawlMode = "manual" | "vercel-cron";
 
 export type CrawlSummary = {
@@ -85,6 +101,7 @@ export type CrawlSummary = {
   pagesFetched: number;
   detailsFetched: number;
   stoppedReason?: string;
+  targets?: CrawlTargetSummary[];
 };
 
 export interface IngestionListingRow {

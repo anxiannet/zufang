@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import { markRemovedFromSource, upsertRawListing } from "../db/listingRepository";
-import { CrawlMode, CrawlStats, CrawlSummary, ListListing } from "../models/listing";
-import { config } from "../utils/config";
+import { CrawlMode, CrawlStats, CrawlSummary, CrawlTargetSummary, ListListing } from "../models/listing";
+import { config, CrawlTarget } from "../utils/config";
 import { HttpStatusError } from "./httpClient";
 import { randomDelay } from "../utils/sleep";
 import { logger } from "../utils/logger";
@@ -17,6 +17,12 @@ type CrawlOptions = {
   maxDetails?: number;
   maxInserted?: number;
   mode?: CrawlMode;
+};
+
+type StatsTarget = {
+  source: string;
+  entryUrl: string;
+  label: string;
 };
 
 export async function crawlZufang(): Promise<CrawlStats> {
@@ -46,12 +52,71 @@ export async function crawlZufangRecentListings(options: CrawlOptions): Promise<
     errors: stats.errors,
     pagesFetched: stats.pagesVisited,
     detailsFetched: stats.detailsFetched,
-    stoppedReason: stats.stopReason ?? undefined
+    stoppedReason: stats.stopReason ?? undefined,
+    targets: stats.targets
   };
 }
 
-async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<CrawlStats> {
-  const stats: CrawlStats = {
+async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<CrawlStats & { targets: CrawlTargetSummary[] }> {
+  const totalStats = createStats({
+    source: "multi",
+    entryUrl: "",
+    label: "multi-source crawl"
+  });
+  const targets: CrawlTargetSummary[] = [];
+
+  logger.info("crawl started", {
+    mode: options.mode,
+    days: options.days,
+    max_pages_per_target: options.maxPages,
+    max_details: options.maxDetails,
+    max_inserted: options.maxInserted,
+    detail_concurrency: config.detailConcurrency,
+    targets: config.crawlTargets.map((target) => target.label)
+  });
+
+  for (const target of config.crawlTargets) {
+    if (totalStats.listingsInserted >= options.maxInserted) {
+      totalStats.stopReason = `达到本次新增目标 ${options.maxInserted}`;
+      break;
+    }
+
+    if (totalStats.detailsFetched >= options.maxDetails) {
+      totalStats.stopReason = `达到本次详情安全上限 ${options.maxDetails}`;
+      break;
+    }
+
+    activateCrawlTarget(target);
+    const remainingInserted = options.maxInserted - totalStats.listingsInserted;
+    const remainingDetails = options.maxDetails - totalStats.detailsFetched;
+    const targetStats = await crawlTargetInternal(target, {
+      ...options,
+      maxDetails: remainingDetails,
+      maxInserted: remainingInserted
+    });
+
+    mergeStats(totalStats, targetStats);
+    targets.push(toTargetSummary(targetStats));
+
+    if (totalStats.listingsInserted >= options.maxInserted) {
+      totalStats.stopReason = `达到本次新增目标 ${options.maxInserted}`;
+      break;
+    }
+  }
+
+  if (!totalStats.stopReason) {
+    totalStats.stopReason = `所有采集源已完成，新增 ${totalStats.listingsInserted}/${options.maxInserted}`;
+  }
+
+  logger.info("crawl finished", totalStats as unknown as Record<string, unknown>);
+  return { ...totalStats, targets };
+}
+
+function createStats(target: StatsTarget): CrawlStats {
+  return {
+    source: target.source,
+    entryUrl: target.entryUrl,
+    targetLabel: target.label,
     pagesVisited: 0,
     listingsParsed: 0,
     detailsFetched: 0,
@@ -63,7 +128,10 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
     errors: 0,
     stopReason: null
   };
+}
 
+async function crawlTargetInternal(target: CrawlTarget, options: Required<CrawlOptions>): Promise<CrawlStats> {
+  const stats = createStats(target);
   let pageUrl: string | null = config.entryUrl;
   let page = 1;
   let detailsScheduled = 0;
@@ -72,7 +140,10 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
   const maxDetails = options.maxDetails;
   const maxInserted = options.maxInserted;
 
-  logger.info("crawl started", {
+  logger.info("crawl target started", {
+    source: target.source,
+    entry_url: target.entryUrl,
+    target_label: target.label,
     mode: options.mode,
     days: crawlDays,
     max_pages: maxPages,
@@ -109,6 +180,7 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
     }
 
     const freshListings: ListListing[] = [];
+    let pageHadOldListings = false;
 
     for (const listing of parsed.listings) {
       stats.listingsParsed += 1;
@@ -127,15 +199,25 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
 
       await saveRawListItem(listing);
 
-      if (listing.listPostedAt && isOlderThanDays(listing.listPostedAt, crawlDays)) {
-        stats.stopReason = `发现超过 ${crawlDays} 天的房源，停止翻页`;
+      if (listing.listPostedAt && isOlderThanDays(listing.listPostedAt, crawlDays) && !listing.isTop) {
+        pageHadOldListings = true;
+        stats.listingsSkipped += 1;
         logger.skip("old listing reached", {
           page,
           source_id: listing.sourceId,
           detail_url: listing.detailUrl,
           posted_at: dayjs(listing.listPostedAt).format("YYYY-MM-DD HH:mm:ss")
         });
-        break;
+        continue;
+      }
+
+      if (listing.listPostedAt && isOlderThanDays(listing.listPostedAt, crawlDays) && listing.isTop) {
+        logger.info("top listing ignores old posted date", {
+          page,
+          source_id: listing.sourceId,
+          detail_url: listing.detailUrl,
+          posted_at: dayjs(listing.listPostedAt).format("YYYY-MM-DD HH:mm:ss")
+        });
       }
 
       if (detailsScheduled >= maxDetails) {
@@ -145,6 +227,11 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
 
       freshListings.push(listing);
       detailsScheduled += 1;
+    }
+
+    if (freshListings.length === 0 && pageHadOldListings) {
+      stats.stopReason = `当前页只有超过 ${crawlDays} 天的房源，停止翻页`;
+      break;
     }
 
     for (let index = 0; index < freshListings.length && stats.listingsInserted < maxInserted; ) {
@@ -188,8 +275,43 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
     page += 1;
   }
 
-  logger.info("crawl finished", stats as unknown as Record<string, unknown>);
+  logger.info("crawl target finished", stats as unknown as Record<string, unknown>);
   return stats;
+}
+
+function activateCrawlTarget(target: CrawlTarget): void {
+  config.crawlSourceName = target.source;
+  config.baseUrl = target.baseUrl;
+  config.entryUrl = target.entryUrl;
+  config.source = target.source;
+  config.category = target.category;
+}
+
+function mergeStats(total: CrawlStats, current: CrawlStats): void {
+  total.pagesVisited += current.pagesVisited;
+  total.listingsParsed += current.listingsParsed;
+  total.detailsFetched += current.detailsFetched;
+  total.listingsSaved += current.listingsSaved;
+  total.listingsSkipped += current.listingsSkipped;
+  total.listingsChanged += current.listingsChanged;
+  total.listingsInserted += current.listingsInserted;
+  total.listingsUpdated += current.listingsUpdated;
+  total.errors += current.errors;
+}
+
+function toTargetSummary(stats: CrawlStats): CrawlTargetSummary {
+  return {
+    source: stats.source,
+    entryUrl: stats.entryUrl,
+    targetLabel: stats.targetLabel,
+    inserted: stats.listingsInserted,
+    updated: stats.listingsUpdated,
+    skipped: stats.listingsSkipped,
+    errors: stats.errors,
+    pagesFetched: stats.pagesVisited,
+    detailsFetched: stats.detailsFetched,
+    stoppedReason: stats.stopReason ?? undefined
+  };
 }
 
 async function processDetail(listing: ListListing, page: number, stats: CrawlStats): Promise<void> {

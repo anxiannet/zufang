@@ -5,39 +5,74 @@ dotenv.config();
 
 type CrawlSourceName = "zufang.sg" | "shichengbbs.com";
 
-const crawlSources: Record<CrawlSourceName, {
+export type CrawlTarget = {
   source: CrawlSourceName;
   baseUrl: string;
   entryUrl: string;
   category: string;
+  label: string;
+};
+
+const crawlSources: Record<CrawlSourceName, Omit<CrawlTarget, "entryUrl" | "label"> & {
+  entryUrl: string;
+  label: string;
 }> = {
   "zufang.sg": {
     source: "zufang.sg",
     baseUrl: "https://www.zufang.sg",
     entryUrl: "https://www.zufang.sg/c31?category2_id=15",
-    category: "单间租房"
+    category: "单间租房",
+    label: "zufang.sg 全站单间"
   },
   "shichengbbs.com": {
     source: "shichengbbs.com",
     baseUrl: "https://www.shichengbbs.com",
     entryUrl: "https://www.shichengbbs.com/c15?area_ids%5B0%5D=10&area_ids%5B1%5D=65&area_ids%5B2%5D=90&area_ids%5B3%5D=50&area_ids%5B4%5D=25&area_ids%5B5%5D=144",
-    category: "单间租房"
+    category: "单间租房",
+    label: "shichengbbs.com 西部 MRT"
   }
 };
 
 const crawlSourceName = (process.env.CRAWL_SOURCE ?? "zufang.sg") as CrawlSourceName;
 const crawlSource = crawlSources[crawlSourceName] ?? crawlSources["zufang.sg"];
+const crawlEntryUrl = process.env.CRAWL_ENTRY_URL ?? "";
+const defaultCrawlTargets: CrawlTarget[] = [
+  {
+    ...crawlSources["shichengbbs.com"],
+    entryUrl: "https://www.shichengbbs.com/c15?area_ids%5B0%5D=10&area_ids%5B1%5D=65&area_ids%5B2%5D=90&area_ids%5B3%5D=50&area_ids%5B4%5D=25&area_ids%5B5%5D=144",
+    label: "shichengbbs.com 西部 MRT"
+  },
+  {
+    ...crawlSources["zufang.sg"],
+    entryUrl: "https://www.zufang.sg/c31?area_ids%5B0%5D=144&area_ids%5B1%5D=25&area_ids%5B2%5D=65&area_ids%5B3%5D=10&area_ids%5B4%5D=90&area_ids%5B5%5D=50",
+    label: "zufang.sg 西部 MRT"
+  },
+  {
+    ...crawlSources["shichengbbs.com"],
+    entryUrl: "https://www.shichengbbs.com/c15",
+    label: "shichengbbs.com 全站单间"
+  },
+  {
+    ...crawlSources["zufang.sg"],
+    entryUrl: "https://www.zufang.sg/c31?category2_id=15",
+    label: "zufang.sg 全站单间"
+  }
+];
+const crawlTargets = crawlEntryUrl
+  ? [{ ...crawlSource, entryUrl: crawlEntryUrl, label: `${crawlSource.source} custom entry` }]
+  : defaultCrawlTargets;
 
 export const config = {
   supabaseUrl: process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
   supabaseKey: process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   crawlSourceName: crawlSource.source,
+  crawlTargets,
   crawlDays: Number.parseInt(process.env.CRAWL_DAYS ?? "3", 10),
   maxPagesPerRun: Number.parseInt(process.env.MAX_PAGES_PER_RUN ?? "5", 10),
   maxDetailsPerRun: Number.parseInt(process.env.MAX_DETAILS_PER_RUN ?? "200", 10),
   maxInsertedPerRun: Number.parseInt(process.env.MAX_INSERTED_PER_RUN ?? "50", 10),
   baseUrl: crawlSource.baseUrl,
-  entryUrl: process.env.CRAWL_ENTRY_URL ?? crawlSource.entryUrl,
+  entryUrl: crawlEntryUrl || crawlSource.entryUrl,
   source: crawlSource.source,
   category: crawlSource.category,
   listingTableName: process.env.INGESTION_TABLE_NAME ?? "ingestion_listings",

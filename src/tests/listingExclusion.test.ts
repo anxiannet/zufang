@@ -3,6 +3,8 @@ import { getHtmlListingExclusionMatch, getListingExclusionMatch } from "../crawl
 
 const excludedExamples = [
   "普通房床位出租",
+  "男搭房近地铁",
+  "女搭房可马上入住",
   "Jurong East bedspace available",
   "bed space near MRT",
   "日租房可马上入住",
