@@ -15,9 +15,25 @@ type CrawlJobRow = {
     skipped?: number;
     errors?: number;
     stoppedReason?: string;
+    postprocess?: {
+      enabled?: boolean;
+      index?: {
+        read?: number;
+        indexed?: number;
+        skipped?: number;
+        errors?: number;
+      };
+      geocoding?: Array<{
+        action?: string;
+        ok?: boolean;
+        data?: Record<string, unknown>;
+      }>;
+    };
   } | null;
   error: string | null;
 };
+
+type PostprocessSummary = NonNullable<NonNullable<CrawlJobRow["summary"]>["postprocess"]>;
 
 export default async function CrawlerAdminPage() {
   const profile = await getCurrentProfile();
@@ -68,6 +84,7 @@ export default async function CrawlerAdminPage() {
                 <th className="px-4 py-3">Updated</th>
                 <th className="px-4 py-3">Skipped</th>
                 <th className="px-4 py-3">Errors</th>
+                <th className="px-4 py-3">后处理</th>
                 <th className="px-4 py-3">停止原因</th>
               </tr>
             </thead>
@@ -85,6 +102,7 @@ export default async function CrawlerAdminPage() {
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.updated ?? 0}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.skipped ?? 0}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.errors ?? 0}</td>
+                  <td className="max-w-[260px] px-4 py-3 text-muted">{formatPostprocess(job.summary?.postprocess)}</td>
                   <td className="max-w-[300px] px-4 py-3 text-muted">
                     {job.error ?? job.summary?.stoppedReason ?? "-"}
                   </td>
@@ -119,6 +137,20 @@ function statusClass(status: string | null) {
   if (status === "failed") return `${base} bg-red-100 text-red-700`;
   if (status === "running") return `${base} bg-amber-100 text-amber-800`;
   return `${base} bg-gray-100 text-gray-700`;
+}
+
+function formatPostprocess(postprocess: PostprocessSummary | undefined) {
+  if (!postprocess) return "-";
+  if (!postprocess.enabled) return "已跳过";
+
+  const index = postprocess.index;
+  const indexText = index ? `索引 ${index.indexed ?? 0}/${index.read ?? 0}` : "索引 -";
+  const geocoding = postprocess.geocoding ?? [];
+  const geocodingText = geocoding
+    .map((step) => `${step.action ?? "-"}:${step.ok ? "ok" : "fail"}`)
+    .join(" ");
+
+  return `${indexText}${geocodingText ? ` · ${geocodingText}` : ""}`;
 }
 
 function formatDate(value: string | null) {

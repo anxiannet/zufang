@@ -1,12 +1,11 @@
-import { DetailListing, ListListing } from "../models/listing";
-import { parseDetailPage } from "../parser/zufangDetailParser";
+import { ListListing, RawDetailListing } from "../models/listing";
 import { config } from "../utils/config";
 import { randomDelay } from "../utils/sleep";
 import { logger } from "../utils/logger";
 import { fetchHtmlWithStatus, HttpStatusError } from "./httpClient";
 import { saveRawDetail } from "./rawStore";
 
-export async function crawlDetailPage(listing: ListListing, page: number): Promise<DetailListing | null> {
+export async function crawlDetailPage(listing: ListListing, page: number): Promise<RawDetailListing | null> {
   const started = Date.now();
 
   try {
@@ -20,27 +19,16 @@ export async function crawlDetailPage(listing: ListListing, page: number): Promi
     });
 
     const { html } = await fetchHtmlWithStatus(listing.detailUrl, config.maxRetries);
-    const detail = parseDetailPage(html, listing.detailUrl);
+    const detail: RawDetailListing = {
+      source: listing.source,
+      sourceId: listing.sourceId,
+      detailUrl: listing.detailUrl,
+      rawDetailHtml: html,
+      scrapedAt: new Date()
+    };
     await saveRawDetail(detail);
 
-    const missing = [
-      ["title", detail.title],
-      ["price", detail.price],
-      ["posted_at", detail.postedAt],
-      ["body_text", detail.bodyText]
-    ].filter(([, value]) => value === null || value === "");
-
-    if (missing.length > 0) {
-      logger.info("[DETAIL_PARSE_WARN]", {
-        source_id: listing.sourceId,
-        detail_url: listing.detailUrl,
-        page,
-        reason: `missing=${missing.map(([key]) => key).join(",")}`,
-        elapsed_ms: Date.now() - started
-      });
-    }
-
-    logger.info("[DETAIL_PARSED]", {
+    logger.info("[DETAIL_RAW_SAVED]", {
       source_id: detail.sourceId,
       detail_url: detail.detailUrl,
       page,

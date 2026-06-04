@@ -13,7 +13,7 @@ type IndexOptions = {
   onlyActive?: boolean;
 };
 
-type IndexSummary = {
+export type IndexSummary = {
   read: number;
   indexed: number;
   skipped: number;
@@ -42,7 +42,6 @@ type NormalizedIndexSource = {
   parsedFromHtml: boolean;
 };
 
-const INDEX_VERSION = "rental-index-v1-html-source";
 const INDEX_TABLE = process.env.LISTING_INDEX_TABLE_NAME ?? "listing_indexes";
 
 export async function indexListings(options: IndexOptions = {}): Promise<IndexSummary> {
@@ -72,7 +71,7 @@ export async function indexListings(options: IndexOptions = {}): Promise<IndexSu
         continue;
       }
 
-      if (indexRow.raw_snapshot.parsed_from_html) {
+      if (Boolean(sourceParsedFromHtml(row))) {
         summary.reparsedFromHtml += 1;
       } else {
         summary.fallbackFromStoredText += 1;
@@ -99,29 +98,19 @@ async function fetchIngestionListings(options: Required<IndexOptions>): Promise<
       "id",
       "source",
       "source_id",
-      "title",
-      "category",
       "listing_url",
       "detail_url",
+      "list_title",
+      "list_posted_text",
+      "list_price",
+      "list_contact",
+      "list_raw_html",
+      "list_raw_text",
       "raw_detail_html",
-      "raw_detail_text",
-      "raw_html",
-      "raw_text",
-      "body_text",
-      "posted_text",
-      "posted_at",
-      "contact_text",
-      "whatsapp_url",
-      "cea_reg_no",
-      "mrt_area",
-      "price",
-      "phone",
-      "wechat",
-      "tags",
       "is_top",
       "removed_from_source",
       "scraped_at",
-      "updated_at"
+      "created_at"
     ].join(","),
     source: `eq.${options.source}`,
     order: "scraped_at.desc.nullslast",
@@ -175,80 +164,60 @@ function buildListingIndexRow(row: IngestionListingRow): ListingIndexRow | null 
   return {
     source: row.source,
     source_id: row.source_id,
-    ingestion_listing_id: row.id,
     title: source.title,
-    listing_url: source.listingUrl,
-    detail_url: source.detailUrl,
-    category: source.category,
+    summary: buildSummary(source.bodyText),
     price: source.price,
-    phone: source.phone,
-    wechat: source.wechat,
-    whatsapp_url: source.whatsappUrl,
-    contact_text: source.contactText,
-    posted_at: source.postedAt,
-    scraped_at: row.scraped_at,
     mrt_area: source.mrtArea,
     tags: source.tags,
     body_text: source.bodyText || null,
     search_text: searchText,
     room_type: semantic.roomType,
     normalized_room_type: semantic.normalizedRoomType,
-    available_from: semantic.availableFrom?.toISOString() ?? null,
     cooking_allowed: semantic.cookingAllowed,
     can_register_address: semantic.canRegisterAddress,
     landlord_stay: semantic.landlordStay,
-    bathroom_type: semantic.bathroomType,
-    shared_bathroom_count: semantic.sharedBathroomCount,
-    current_tenant_count: semantic.currentTenantCount,
     gender_preference: semantic.genderPreference,
     amenities: semantic.amenities,
     address_text: semantic.addressText,
     postal_code: semantic.postalCode,
-    image_urls: semantic.imageUrls,
     fingerprint: semantic.fingerprint,
-    raw_snapshot: {
-      ...semantic.rawSnapshot,
-      ingestion_listing_id: row.id,
-      source_id: row.source_id,
-      posted_text: source.postedText,
-      cea_reg_no: source.ceaRegNo,
-      parsed_from_html: source.parsedFromHtml,
-      html_available: Boolean(row.raw_detail_html || row.raw_html)
-    },
-    index_version: INDEX_VERSION,
     indexed_at: new Date().toISOString(),
+    near_ntu: isNearNtu(source, semantic),
+    ntu_score: scoreNtuFit(source, semantic),
+    student_friendly: isStudentFriendly(source, semantic),
+    match_reasons: buildMatchReasons(source, semantic),
     status
   };
 }
 
 function normalizeIndexSource(row: IngestionListingRow): NormalizedIndexSource {
   const detailUrl = row.detail_url ?? row.listing_url ?? "";
-  const html = row.raw_detail_html || row.raw_html;
+  const html = row.raw_detail_html;
 
   if (html && detailUrl) {
     try {
       const parsed = parseDetailPage(html, detailUrl);
-      const title = cleanText(parsed.title ?? row.title ?? "");
-      const rawDetailText = cleanMultilineText(parsed.rawDetailText || row.raw_detail_text || row.raw_text || "");
+      const title = cleanText(parsed.title ?? row.list_title ?? "");
+      const rawDetailText = cleanMultilineText(parsed.rawDetailText || row.list_raw_text || "");
       const bodyText = cleanMultilineText(parsed.bodyText ?? rawDetailText);
 
       return {
         title,
-        category: parsed.category ?? row.category,
+        category: parsed.category,
         listingUrl: row.listing_url,
         detailUrl,
         rawDetailText,
         bodyText,
-        postedText: parsed.postedText ?? row.posted_text,
-        postedAt: parsed.postedAt?.toISOString() ?? row.posted_at,
-        contactText: parsed.contactText ?? row.contact_text,
-        whatsappUrl: parsed.whatsappUrl ?? row.whatsapp_url,
-        ceaRegNo: parsed.ceaRegNo ?? row.cea_reg_no,
-        mrtArea: parsed.mrtArea ?? row.mrt_area,
-        price: parsed.price ?? row.price,
-        phone: parsed.phone ?? row.phone,
-        wechat: parsed.wechat ?? row.wechat,
-        tags: parsed.tags.length > 0 ? parsed.tags : row.tags ?? [],
+        postedText: parsed.postedText ?? row.list_posted_text,
+        postedAt: parsed.postedAt?.toISOString() ?? null,
+        contactText: parsed.contactText ?? row.list_contact,
+        whatsappUrl: parsed.whatsappUrl,
+        ceaRegNo: parsed.ceaRegNo,
+        mrtArea: parsed.mrtArea,
+        price: parsed.price ?? row.list_price,
+        phone: parsed.phone,
+        wechat: parsed.wechat,
+        tags: parsed.tags,
         parsedFromHtml: true
       };
     } catch (error) {
@@ -259,26 +228,26 @@ function normalizeIndexSource(row: IngestionListingRow): NormalizedIndexSource {
     }
   }
 
-  const rawDetailText = cleanMultilineText(row.raw_detail_text ?? row.raw_text ?? "");
-  const bodyText = cleanMultilineText(row.body_text ?? rawDetailText);
+  const rawDetailText = cleanMultilineText(row.list_raw_text ?? "");
+  const bodyText = rawDetailText;
 
   return {
-    title: cleanText(row.title ?? ""),
-    category: row.category,
+    title: cleanText(row.list_title ?? ""),
+    category: null,
     listingUrl: row.listing_url,
     detailUrl,
     rawDetailText,
     bodyText,
-    postedText: row.posted_text,
-    postedAt: row.posted_at,
-    contactText: row.contact_text,
-    whatsappUrl: row.whatsapp_url,
-    ceaRegNo: row.cea_reg_no,
-    mrtArea: row.mrt_area,
-    price: row.price,
-    phone: row.phone,
-    wechat: row.wechat,
-    tags: row.tags ?? [],
+    postedText: row.list_posted_text,
+    postedAt: null,
+    contactText: row.list_contact,
+    whatsappUrl: null,
+    ceaRegNo: null,
+    mrtArea: null,
+    price: row.list_price,
+    phone: null,
+    wechat: null,
+    tags: [],
     parsedFromHtml: false
   };
 }
@@ -292,6 +261,45 @@ async function upsertListingIndex(row: ListingIndexRow): Promise<void> {
     },
     body: JSON.stringify(row)
   });
+}
+
+function sourceParsedFromHtml(row: IngestionListingRow): boolean {
+  return Boolean((row.raw_detail_html && (row.detail_url || row.listing_url)));
+}
+
+function buildSummary(bodyText: string): string | null {
+  const value = cleanText(bodyText).slice(0, 220);
+  return value || null;
+}
+
+function isNearNtu(source: NormalizedIndexSource, semantic: ReturnType<typeof parseSemanticRentalFields>): boolean {
+  const text = `${source.title}\n${source.mrtArea ?? ""}\n${source.bodyText}\n${semantic.addressText ?? ""}`;
+  return /ntu|南洋理工|jurong|boon lay|pioneer|文礼|先驱|裕廊/i.test(text);
+}
+
+function scoreNtuFit(source: NormalizedIndexSource, semantic: ReturnType<typeof parseSemanticRentalFields>): number {
+  let score = 0;
+  if (isNearNtu(source, semantic)) score += 40;
+  if (source.price !== null && source.price <= 1200) score += 20;
+  if (semantic.cookingAllowed) score += 10;
+  if (semantic.canRegisterAddress) score += 10;
+  if (semantic.amenities.includes("near_mrt")) score += 10;
+  if (semantic.normalizedRoomType !== "unknown") score += 10;
+  return Math.min(score, 100);
+}
+
+function isStudentFriendly(source: NormalizedIndexSource, semantic: ReturnType<typeof parseSemanticRentalFields>): boolean {
+  return scoreNtuFit(source, semantic) >= 50 || /学生|student/i.test(`${source.title}\n${source.bodyText}`);
+}
+
+function buildMatchReasons(source: NormalizedIndexSource, semantic: ReturnType<typeof parseSemanticRentalFields>): string[] {
+  const reasons: string[] = [];
+  if (isNearNtu(source, semantic)) reasons.push("near_ntu_area");
+  if (source.price !== null && source.price <= 1200) reasons.push("student_budget");
+  if (semantic.amenities.includes("near_mrt")) reasons.push("near_mrt");
+  if (semantic.cookingAllowed) reasons.push("cooking_allowed");
+  if (semantic.canRegisterAddress) reasons.push("can_register_address");
+  return reasons;
 }
 
 function buildSearchText(input: {

@@ -1,6 +1,6 @@
 import dayjs from "dayjs";
-import { markRemovedFromSource, upsertListing } from "../db/listingRepository";
-import { CrawlMode, CrawlStats, CrawlSummary, DetailListing, Listing, ListListing } from "../models/listing";
+import { markRemovedFromSource, upsertRawListing } from "../db/listingRepository";
+import { CrawlMode, CrawlStats, CrawlSummary, ListListing } from "../models/listing";
 import { config } from "../utils/config";
 import { HttpStatusError } from "./httpClient";
 import { randomDelay } from "../utils/sleep";
@@ -140,7 +140,7 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
       index += batch.length;
 
       const results = await Promise.allSettled(
-        batch.map((listing) => processDetail(listing, page, stats, crawlDays))
+        batch.map((listing) => processDetail(listing, page, stats))
       );
 
       for (const result of results) {
@@ -178,7 +178,7 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
   return stats;
 }
 
-async function processDetail(listing: ListListing, page: number, stats: CrawlStats, crawlDays: number): Promise<void> {
+async function processDetail(listing: ListListing, page: number, stats: CrawlStats): Promise<void> {
   const started = Date.now();
 
   try {
@@ -190,20 +190,7 @@ async function processDetail(listing: ListListing, page: number, stats: CrawlSta
 
     stats.detailsFetched += 1;
 
-    if (detail.postedAt && isOlderThanDays(detail.postedAt, crawlDays)) {
-      stats.listingsSkipped += 1;
-      logger.skip("[DETAIL_SKIPPED_OLD]", {
-        source_id: listing.sourceId,
-        detail_url: listing.detailUrl,
-        page,
-        reason: dayjs(detail.postedAt).format("YYYY-MM-DD HH:mm:ss"),
-        elapsed_ms: Date.now() - started
-      });
-      return;
-    }
-
-    const merged = mergeListing(listing, detail);
-    const result = await upsertListing(merged);
+    const result = await upsertRawListing({ list: listing, detail });
     stats.listingsSaved += 1;
     if (result.inserted) {
       stats.listingsInserted += 1;
@@ -215,7 +202,7 @@ async function processDetail(listing: ListListing, page: number, stats: CrawlSta
       stats.listingsChanged += 1;
     }
 
-    logger.info("[DETAIL_SAVED]", {
+    logger.info("[DETAIL_RAW_UPSERTED]", {
       source_id: listing.sourceId,
       detail_url: listing.detailUrl,
       page,
@@ -232,56 +219,4 @@ async function processDetail(listing: ListListing, page: number, stats: CrawlSta
     stats.listingsSkipped += 1;
     throw error;
   }
-}
-
-function mergeListing(list: ListListing, detail: DetailListing): Listing {
-  const title = detail.title || list.listTitle || `zufang.sg ${list.sourceId}`;
-  const category = detail.category || config.category;
-  const price = detail.price ?? list.listPrice;
-  const phone = detail.phone ?? list.listPhone;
-  const postedAt = detail.postedAt ?? list.listPostedAt;
-  const tags = detail.tags.length > 0 ? detail.tags : list.listTags;
-  const mrtArea = detail.mrtArea ?? list.listMrtArea;
-  const wechat = detail.wechat ?? list.listWechat;
-
-  return {
-    ...detail,
-    source: list.source,
-    sourceId: list.sourceId,
-    detailUrl: list.detailUrl,
-    listingUrl: list.detailUrl,
-    title,
-    category,
-    price,
-    phone,
-    postedAt,
-    tags,
-    mrtArea,
-    wechat,
-    listTitle: list.listTitle,
-    listPostedText: list.listPostedText,
-    listPrice: list.listPrice,
-    listContact: list.listContact,
-    listRawHtml: list.listRawHtml,
-    listRawText: list.listRawText,
-    scrapedAt: detail.scrapedAt,
-    isTop: list.isTop,
-    latestSourceSnapshot: {
-      source_id: list.sourceId,
-      detail_url: list.detailUrl,
-      title,
-      posted_text: detail.postedText,
-      posted_at: postedAt?.toISOString() ?? null,
-      category,
-      mrt_area: mrtArea,
-      price,
-      contact_text: detail.contactText,
-      phone,
-      whatsapp_url: detail.whatsappUrl,
-      wechat,
-      tags,
-      body_text: detail.bodyText,
-      cea_reg_no: detail.ceaRegNo
-    }
-  };
 }

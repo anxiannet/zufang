@@ -2,6 +2,7 @@ import { createCrawlJob, failCrawlJob, findRecentRunningJob, finishCrawlJob } fr
 import { CrawlMode, CrawlSummary } from "../models/listing";
 import { config, validateConfig } from "../utils/config";
 import { flushLogger, setLoggerJobId } from "../utils/logger";
+import { runPostCrawlPipeline } from "../pipeline/postCrawlPipeline";
 import { crawlZufangRecentListings } from "./zufangCrawler";
 
 const JOB_NAME = "zufang-daily-crawl";
@@ -36,13 +37,18 @@ export async function runZufangCrawlJob(mode: CrawlMode): Promise<CrawlJobRunRes
   setLoggerJobId(job.id);
 
   try {
-    const summary = await crawlZufangRecentListings({
+    const crawlSummary = await crawlZufangRecentListings({
       days: config.crawlDays,
       maxPages: config.maxPagesPerRun,
       maxDetails: config.maxDetailsPerRun,
       maxInserted: config.maxInsertedPerRun,
       mode
     });
+    const postprocess = await runPostCrawlPipeline();
+    const summary: CrawlSummary = {
+      ...crawlSummary,
+      postprocess: postprocess as unknown as Record<string, unknown>
+    };
     await flushLogger();
     await finishCrawlJob(job.id, summary);
     const finishedAt = new Date().toISOString();

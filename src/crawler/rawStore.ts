@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import dayjs from "dayjs";
-import { DetailListing, ListListing } from "../models/listing";
+import { ListListing, RawDetailListing } from "../models/listing";
 import { config } from "../utils/config";
 
 function rawDir(): string {
@@ -27,13 +27,10 @@ export async function saveRawListItem(listing: ListListing): Promise<void> {
   ]);
 }
 
-export async function saveRawDetail(detail: DetailListing): Promise<void> {
+export async function saveRawDetail(detail: RawDetailListing): Promise<void> {
   if (!config.writeRawFiles) return;
   const dir = rawDir();
   await mkdir(dir, { recursive: true });
   const safeId = detail.sourceId.replace(/[^\w.-]+/g, "_");
-  await Promise.all([
-    writeFile(path.join(dir, `${safeId}.detail.html`), detail.rawDetailHtml, "utf8"),
-    writeFile(path.join(dir, `${safeId}.detail.txt`), detail.rawDetailText, "utf8")
-  ]);
+  await writeFile(path.join(dir, `${safeId}.detail.html`), detail.rawDetailHtml, "utf8");
 }

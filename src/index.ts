@@ -1,16 +1,10 @@
-import { crawlZufangRecentListings } from "./crawler/zufangCrawler";
-import { config, validateConfig } from "./utils/config";
+import { runZufangCrawlJob } from "./crawler/crawlJobRunner";
+import { validateConfig } from "./utils/config";
 import { logger } from "./utils/logger";
 
 async function main(): Promise<void> {
   validateConfig();
-  const summary = await crawlZufangRecentListings({
-    days: config.crawlDays,
-    maxPages: config.maxPagesPerRun,
-    maxDetails: config.maxDetailsPerRun,
-    maxInserted: config.maxInsertedPerRun,
-    mode: "manual"
-  });
+  const summary = await runZufangCrawlJob("manual");
   logger.info("local crawl summary", summary);
 }
 

@@ -10,17 +10,16 @@ type IngestionListingRow = {
   id: number;
   source: string | null;
   source_id: string | null;
-  title: string | null;
   listing_url: string | null;
-  category: string | null;
-  mrt_area: string | null;
-  price: number | null;
-  phone: string | null;
-  wechat: string | null;
-  tags: string[] | null;
-  posted_at: string | null;
+  detail_url: string | null;
+  list_title: string | null;
+  list_posted_text: string | null;
+  list_price: number | null;
+  list_contact: string | null;
+  list_raw_html: string | null;
+  list_raw_text: string | null;
+  raw_detail_html: string | null;
   scraped_at: string | null;
-  raw_text: string | null;
   is_top: boolean | null;
   created_at: string | null;
 };
@@ -49,8 +48,6 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
   const listings = data.listings as IngestionListingRow[];
   const q = field(params.q);
   const selectedSource = field(params.source);
-  const selectedCategory = field(params.category);
-  const mrtArea = field(params.mrt_area);
   const isTop = field(params.is_top);
 
   return (
@@ -63,23 +60,23 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
             采集数据
           </div>
           <h1 className="mt-2 text-2xl font-bold text-ink">采集房源管理</h1>
-          <p className="mt-2 text-sm text-muted">检查抓取质量、联系方式、原帖链接和待清洗文本，筛出可转成标准房源的数据。</p>
+          <p className="mt-2 text-sm text-muted">检查原始抓取质量、原帖链接和详情页 HTML，解析索引在下一步处理。</p>
         </div>
         <Link href="/admin" className="btn-secondary">返回后台</Link>
       </div>
 
       <section className="grid gap-3 md:grid-cols-4">
         <Metric label="抓取总数" value={data.stats.total} />
-        <Metric label="有价格" value={data.stats.with_price} />
-        <Metric label="有联系方式" value={data.stats.with_contact} />
+        <Metric label="有详情 HTML" value={data.stats.with_detail_html} />
+        <Metric label="有列表 HTML" value={data.stats.with_list_html} />
         <Metric label="置顶帖" value={data.stats.top} />
       </section>
 
       <section className="card p-4">
-        <form className="grid gap-3 md:grid-cols-[1.5fr_1fr_1fr_1fr_auto_auto]" action="/admin/ingestion">
+        <form className="grid gap-3 md:grid-cols-[1.5fr_1fr_auto_auto]" action="/admin/ingestion">
           <div>
             <label htmlFor="q">关键词</label>
-            <input id="q" name="q" defaultValue={q} placeholder="标题、原文、电话、微信、source_id" />
+            <input id="q" name="q" defaultValue={q} placeholder="列表标题、列表文本、联系方式、source_id" />
           </div>
           <div>
             <label htmlFor="source">来源</label>
@@ -89,19 +86,6 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
                 <option key={source} value={source}>{source}</option>
               ))}
             </select>
-          </div>
-          <div>
-            <label htmlFor="category">分类</label>
-            <select id="category" name="category" defaultValue={selectedCategory}>
-              <option value="">全部分类</option>
-              {data.categoryOptions.map((category) => (
-                <option key={category} value={category}>{category}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="mrt_area">MRT / 区域</label>
-            <input id="mrt_area" name="mrt_area" defaultValue={mrtArea} placeholder="Jurong / Tampines" />
           </div>
           <label className="flex items-center gap-2 self-end rounded-md border border-line bg-white px-3 py-2 text-sm font-semibold text-ink">
             <input className="h-4 w-4" type="checkbox" name="is_top" value="true" defaultChecked={isTop === "true"} />
@@ -121,9 +105,8 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
             <thead className="bg-gray-50 text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th className="px-4 py-3">房源</th>
-                <th className="px-4 py-3">价格 / 区域</th>
-                <th className="px-4 py-3">联系方式</th>
-                <th className="px-4 py-3">标签</th>
+                <th className="px-4 py-3">列表信息</th>
+                <th className="px-4 py-3">HTML</th>
                 <th className="px-4 py-3">时间</th>
                 <th className="px-4 py-3 text-right">操作</th>
               </tr>
@@ -134,36 +117,28 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
                   <td className="max-w-[360px] px-4 py-3">
                     <div className="flex items-center gap-2">
                       {listing.is_top ? <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">TOP</span> : null}
-                      <span className="font-semibold text-ink">{listing.title || "未命名抓取记录"}</span>
+                      <span className="font-semibold text-ink">{listing.list_title || "未命名抓取记录"}</span>
                     </div>
                     <div className="mt-1 text-xs text-muted">{listing.source ?? "unknown"} · {listing.source_id ?? "-"}</div>
-                    {listing.raw_text ? <p className="mt-2 line-clamp-2 text-muted">{listing.raw_text}</p> : null}
+                    {listing.list_raw_text ? <p className="mt-2 line-clamp-2 text-muted">{listing.list_raw_text}</p> : null}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="font-semibold text-ink">{listing.price ? `$${listing.price}` : "价格缺失"}</div>
-                    <div className="mt-1 text-muted">{listing.mrt_area ?? "区域缺失"}</div>
-                    <div className="mt-1 text-xs text-muted">{listing.category ?? "未分类"}</div>
+                    <div className="font-semibold text-ink">{listing.list_price ? `$${listing.list_price}` : "价格未识别"}</div>
+                    <div className="mt-1 text-muted">{listing.list_contact ?? "联系方式未识别"}</div>
+                    <div className="mt-1 text-xs text-muted">列表发布时间：{listing.list_posted_text ?? "-"}</div>
                   </td>
                   <td className="px-4 py-3">
-                    <div>电话：{listing.phone ?? "-"}</div>
-                    <div className="mt-1">微信：{listing.wechat ?? "-"}</div>
-                  </td>
-                  <td className="max-w-[180px] px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {(listing.tags ?? []).slice(0, 5).map((tag) => (
-                        <span key={tag} className="rounded border border-line px-2 py-0.5 text-xs text-muted">{tag}</span>
-                      ))}
-                      {(listing.tags?.length ?? 0) > 5 ? <span className="text-xs text-muted">+{(listing.tags?.length ?? 0) - 5}</span> : null}
-                    </div>
+                    <div>详情：{listing.raw_detail_html ? "已保存" : "缺失"}</div>
+                    <div className="mt-1">列表：{listing.list_raw_html ? "已保存" : "缺失"}</div>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    <div>发布：{formatDate(listing.posted_at)}</div>
+                    <div>列表：{listing.list_posted_text ?? "-"}</div>
                     <div className="mt-1">抓取：{formatDate(listing.scraped_at)}</div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
-                      {listing.listing_url ? (
-                        <a className="btn-secondary px-3 py-1.5" href={listing.listing_url} target="_blank" rel="noreferrer">
+                      {(listing.detail_url || listing.listing_url) ? (
+                        <a className="btn-secondary px-3 py-1.5" href={listing.detail_url || listing.listing_url || "#"} target="_blank" rel="noreferrer">
                           原帖
                         </a>
                       ) : null}

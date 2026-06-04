@@ -79,7 +79,7 @@ export function parseDetailPage(html: string, detailUrl: string): DetailListing 
     postedText,
     postedAt: postedText ? parsePostedAt(postedText) : parsePostedAt(rawDetailText),
     category,
-    mrtArea: extractLabeledValue(rawDetailText, "地铁") ?? extractMrtArea(rawDetailText),
+    mrtArea: extractMrtLabeledValue(rawDetailText) ?? extractLineLabeledValue(rawDetailText, "地铁") ?? extractLabeledValue(rawDetailText, "地铁") ?? extractMrtArea(rawDetailText),
     price,
     contactText,
     phone: extractPhone(`${contactText ?? ""}\n${rawDetailText}`),
@@ -150,6 +150,11 @@ function extractSourceId(detailUrl: string, text: string): string {
 }
 
 function extractTitle($: cheerio.CheerioAPI, text: string): string | null {
+  const documentTitle = cleanText($("title").first().text()).split(/\s+-\s+/)[0];
+  if (documentTitle && !/登录|注册|租房网|狮城BBS|相关广告|相关推荐/.test(documentTitle)) {
+    return documentTitle;
+  }
+
   const selectors = ["h1", ".title", ".node-title", ".page-title", "article h2"];
   for (const selector of selectors) {
     const value = cleanText($(selector).first().text());
@@ -189,9 +194,25 @@ function extractLabeledValue(text: string, label: string): string | null {
   return value ? cleanText(value) : null;
 }
 
+function extractLineLabeledValue(text: string, label: string): string | null {
+  const line = text
+    .split(/\n+/)
+    .map((value) => cleanText(value))
+    .find((value) => value.startsWith(label));
+
+  if (!line) return null;
+  const value = cleanText(line.replace(new RegExp(`^${label}\\s*[:：]?\\s*`), ""));
+  return value || null;
+}
+
 function extractLabeledPrice(text: string): number | null {
   const value = extractLabeledValue(text, "价格");
   return value ? extractPrice(value) : null;
+}
+
+function extractMrtLabeledValue(text: string): string | null {
+  const match = text.match(/(?:^|\s)地铁\s+([A-Za-z][A-Za-z\s]+,\s*[\u4e00-\u9fa5]{1,8})/);
+  return match?.[1] ? cleanText(match[1]) : null;
 }
 
 function extractMrtArea(text: string): string | null {
@@ -241,6 +262,6 @@ function isNoiseLine(line: string): boolean {
 }
 
 function extractCeaRegNo(text: string): string | null {
-  const match = text.match(/\b[RS]\d{7}[A-Z]\b/i);
-  return match?.[0]?.toUpperCase() ?? null;
+  const match = text.match(/\b[RS]\d{6,7}[A-Z]\b/i);
+  return match?.[0] ?? null;
 }

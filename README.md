@@ -27,8 +27,16 @@
 - 后台状态页：`/admin/crawler` 显示最近 20 次 `crawl_jobs`，不在前端暴露 `CRON_SECRET`。
 - 爬虫入口：`src/crawler/zufangCrawler.ts` 导出 `crawlZufangRecentListings`。
 - 本地手动测试：`npm run crawl:local`。
+- 本地解析索引：`npm run index:listings`，从 `ingestion_listings.raw_detail_html` 解析并写入 `listing_indexes`。
 
-Vercel Serverless Function 不适合长时间爬取，默认每次最多抓 5 页，成功新增 50 条符合最近 3 天条件的房源后停止；详情页处理保留 200 个安全上限，详情并发为 2。超过限制会停止本次任务，明天继续。
+Vercel Serverless Function 不适合长时间爬取，默认每次最多抓 5 页，成功新增 50 条符合最近 3 天条件的原始房源后停止；详情页处理保留 200 个安全上限，详情并发为 2。超过限制会停止本次任务，明天继续。
+
+采集任务成功保存 raw HTML 后，会自动执行后处理流水线：
+
+1. 解析详情页 HTML、清理/结构化字段，并写入 `listing_indexes`
+2. 扫描索引中的邮编并加入 `geocoding_cache`
+3. 如果配置了 `SUPABASE_FUNCTIONS_JWT`，调用 `admin-geocoding` 执行外部地理编码
+4. 同步坐标、学校距离和通勤估算回索引表
 
 手动触发示例：
 
@@ -37,7 +45,7 @@ curl -X POST https://your-domain.com/api/admin/crawl-zufang \
   -H "Authorization: Bearer $CRON_SECRET"
 ```
 
-详情页采集会先从列表页发现房源 URL，再请求详情页解析完整字段；列表页字段以 `list_*` 保存为备用，详情页字段作为主数据。采集继续保留 `raw_html`、`raw_text`、`raw_detail_html`、`raw_detail_text`、`latest_source_snapshot`、`user_corrected_fields`、`needs_review`、`listing_change_logs`。
+详情页采集只做两件事：从列表页发现房源 URL，然后请求详情页并保存 `raw_detail_html`。采集阶段不解析详情页内容，不写入详情页结构化字段；解析、语义字段抽取和搜索索引由后续 `index:listings` 分步处理。列表页发现信息仍以 `list_*` 保存，方便排查和后台管理。
 
 ## 快速开始
 
@@ -59,6 +67,7 @@ cp .env.example .env.local
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SECRET_KEY=
+SUPABASE_FUNCTIONS_JWT=
 CRON_SECRET=
 DATABASE_URL=
 CRAWL_DAYS=3
@@ -66,6 +75,9 @@ MAX_PAGES_PER_RUN=5
 MAX_INSERTED_PER_RUN=50
 MAX_DETAILS_PER_RUN=200
 DETAIL_CONCURRENCY=2
+POST_CRAWL_PIPELINE_ENABLED=true
+POST_CRAWL_INDEX_LIMIT=200
+POST_CRAWL_GEOCODING_LIMIT=50
 ```
 
 3. 执行数据库迁移
@@ -77,7 +89,7 @@ supabase db push
 ```
 
 迁移会创建核心表、枚举、索引、RLS policies、`listing-images` Storage bucket。
-采集相关迁移会创建 `crawl_jobs`、`crawl_logs`，并补齐 `ingestion_listings` 的详情页字段和 `listing_change_logs`。
+采集相关迁移会创建 `crawl_jobs`、`crawl_logs`，并将 `ingestion_listings` 收束为原始采集表；结构化解析结果写入 `listing_indexes`。
 
 4. 启动本地开发
 

@@ -202,11 +202,15 @@ function extractContacts(
   const wechatNode = node.find(".node-list-contact--wechat").first();
   const wechatText = cleanText(String(wechatNode.attr("data-clipboard-text") ?? wechatNode.text()));
 
-  return {
-    phone: extractPhone(phoneText) ?? (wechatText ? null : extractPhone(rawText)),
-    wechat: wechatText || extractWechat(rawText),
-    contactText: phoneText || wechatText || null
-  };
+  const phone = extractPhone(phoneText) ?? (isUsefulContactText(wechatText) ? null : extractPhone(rawText));
+  const wechat = isUsefulContactText(wechatText) ? wechatText : extractWechat(rawText);
+  const contactText = isUsefulContactText(phoneText) ? phoneText : isUsefulContactText(wechatText) ? wechatText : null;
+
+  return { phone, wechat, contactText };
+}
+
+function isUsefulContactText(text: string): boolean {
+  return text.length >= 5 && !/^\d{1,4}$/.test(text);
 }
 
 function extractSourceId(url: string): string {

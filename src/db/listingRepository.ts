@@ -1,20 +1,10 @@
-import { Listing } from "../models/listing";
+import { ListListing, RawDetailListing } from "../models/listing";
 import { config } from "../utils/config";
-import { logger } from "../utils/logger";
 import { supabaseRequest } from "./pool";
 
 type ExistingListingRow = {
   id: string | number;
-  source: string;
-  source_id: string;
-  title: string | null;
-  price: number | null;
-  phone: string | null;
-  wechat: string | null;
-  mrt_area: string | null;
-  tags: string[] | null;
-  body_text: string | null;
-  user_corrected_fields: Record<string, boolean> | null;
+  raw_detail_html: string | null;
 };
 
 type SaveResult = {
@@ -22,17 +12,14 @@ type SaveResult = {
   changed: boolean;
 };
 
-type FieldChange = {
-  field_name: string;
-  old_value: unknown;
-  new_value: unknown;
+type RawListingInput = {
+  list: ListListing;
+  detail: RawDetailListing;
 };
 
-const trackedFields = ["title", "price", "phone", "wechat", "mrt_area", "tags", "body_text"] as const;
-
-export async function upsertListing(listing: Listing): Promise<SaveResult> {
-  const existing = await findExistingListing(listing.source, listing.sourceId);
-  const row = toListingRow(listing);
+export async function upsertRawListing(input: RawListingInput): Promise<SaveResult> {
+  const existing = await findExistingListing(input.detail.source, input.detail.sourceId);
+  const row = toRawListingRow(input);
 
   if (!existing) {
     await supabaseRequest(`${config.listingTableName}?on_conflict=source,source_id`, {
@@ -46,39 +33,18 @@ export async function upsertListing(listing: Listing): Promise<SaveResult> {
     return { inserted: true, changed: false };
   }
 
-  const changes = detectChanges(existing, row);
-  const protectedFields = existing.user_corrected_fields ?? {};
-  const updateRow: Record<string, unknown> = { ...row };
+  const changed = normalizeComparable(existing.raw_detail_html) !== normalizeComparable(row.raw_detail_html);
 
-  for (const field of Object.keys(protectedFields)) {
-    if (protectedFields[field]) {
-      delete updateRow[field];
-    }
-  }
-
-  if (changes.length > 0) {
-    updateRow.needs_review = true;
-    updateRow.latest_source_snapshot = listing.latestSourceSnapshot;
-    await insertChangeLogs(existing.id, listing, changes);
-    logger.info("[CHANGE_DETECTED]", {
-      source_id: listing.sourceId,
-      detail_url: listing.detailUrl,
-      page: null,
-      reason: changes.map((change) => change.field_name).join(","),
-      elapsed_ms: 0
-    });
-  }
-
-  await supabaseRequest(`${config.listingTableName}?source=eq.${encodeURIComponent(listing.source)}&source_id=eq.${encodeURIComponent(listing.sourceId)}`, {
+  await supabaseRequest(`${config.listingTableName}?source=eq.${encodeURIComponent(input.detail.source)}&source_id=eq.${encodeURIComponent(input.detail.sourceId)}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       Prefer: "return=minimal"
     },
-    body: JSON.stringify(updateRow)
+    body: JSON.stringify(row)
   });
 
-  return { inserted: false, changed: changes.length > 0 };
+  return { inserted: false, changed };
 }
 
 export async function markRemovedFromSource(source: string, sourceId: string): Promise<void> {
@@ -90,7 +56,6 @@ export async function markRemovedFromSource(source: string, sourceId: string): P
     },
     body: JSON.stringify({
       removed_from_source: true,
-      needs_review: true,
       scraped_at: new Date().toISOString()
     })
   });
@@ -98,7 +63,7 @@ export async function markRemovedFromSource(source: string, sourceId: string): P
 
 async function findExistingListing(source: string, sourceId: string): Promise<ExistingListingRow | null> {
   const params = new URLSearchParams({
-    select: "id,source,source_id,title,price,phone,wechat,mrt_area,tags,body_text,user_corrected_fields",
+    select: "id,raw_detail_html",
     source: `eq.${source}`,
     source_id: `eq.${sourceId}`,
     limit: "1"
@@ -106,49 +71,6 @@ async function findExistingListing(source: string, sourceId: string): Promise<Ex
 
   const rows = await supabaseRequest<ExistingListingRow[]>(`${config.listingTableName}?${params.toString()}`);
   return rows[0] ?? null;
-}
-
-function detectChanges(existing: ExistingListingRow, next: Record<string, unknown>): FieldChange[] {
-  const changes: FieldChange[] = [];
-
-  for (const field of trackedFields) {
-      const oldValue = normalizeComparable(existing[field]);
-      const newValue = normalizeComparable(next[field]);
-      if (oldValue !== newValue) {
-        changes.push({
-          field_name: field,
-          old_value: existing[field] ?? null,
-          new_value: next[field] ?? null
-        });
-      }
-  }
-
-  return changes;
-}
-
-async function insertChangeLogs(
-  listingId: string | number,
-  listing: Listing,
-  changes: FieldChange[]
-): Promise<void> {
-  const rows = changes.map((change) => ({
-    listing_id: listingId,
-    source: listing.source,
-    source_id: listing.sourceId,
-    field_name: change.field_name,
-    old_value: change.old_value,
-    new_value: change.new_value,
-    scraped_at: listing.scrapedAt
-  }));
-
-  await supabaseRequest("listing_change_logs", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Prefer: "return=minimal"
-    },
-    body: JSON.stringify(rows)
-  });
 }
 
 function normalizeComparable(value: unknown): string {
@@ -163,38 +85,23 @@ function normalizeComparable(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function toListingRow(listing: Listing): Record<string, unknown> {
+function toRawListingRow(input: RawListingInput): Record<string, unknown> {
+  const { list, detail } = input;
+
   return {
-    source: listing.source,
-    source_id: listing.sourceId,
-    title: listing.title,
-    listing_url: listing.listingUrl,
-    detail_url: listing.detailUrl,
-    list_title: listing.listTitle,
-    list_posted_text: listing.listPostedText,
-    list_price: listing.listPrice,
-    list_contact: listing.listContact,
-    list_raw_html: listing.listRawHtml,
-    list_raw_text: listing.listRawText,
-    raw_html: listing.rawDetailHtml || listing.listRawHtml,
-    raw_text: listing.rawDetailText || listing.listRawText,
-    posted_text: listing.postedText,
-    contact_text: listing.contactText,
-    whatsapp_url: listing.whatsappUrl,
-    body_text: listing.bodyText,
-    cea_reg_no: listing.ceaRegNo,
-    raw_detail_html: listing.rawDetailHtml,
-    raw_detail_text: listing.rawDetailText,
-    category: listing.category,
-    mrt_area: listing.mrtArea,
-    price: listing.price,
-    phone: listing.phone,
-    wechat: listing.wechat,
-    tags: listing.tags,
-    posted_at: listing.postedAt,
-    scraped_at: listing.scrapedAt,
-    is_top: listing.isTop,
-    needs_review: false,
-    latest_source_snapshot: listing.latestSourceSnapshot
+    source: detail.source,
+    source_id: detail.sourceId,
+    listing_url: detail.detailUrl,
+    detail_url: detail.detailUrl,
+    list_title: list.listTitle,
+    list_posted_text: list.listPostedText,
+    list_price: list.listPrice,
+    list_contact: list.listContact,
+    list_raw_html: list.listRawHtml,
+    list_raw_text: list.listRawText,
+    raw_detail_html: detail.rawDetailHtml,
+    scraped_at: detail.scrapedAt,
+    is_top: list.isTop,
+    removed_from_source: false
   };
 }

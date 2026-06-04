@@ -115,8 +115,6 @@ export async function getAdminDashboard() {
 export type IngestionListingFilters = {
   q?: string | string[];
   source?: string | string[];
-  category?: string | string[];
-  mrt_area?: string | string[];
   is_top?: string | string[];
 };
 
@@ -131,56 +129,46 @@ export async function getIngestionListings(filters: IngestionListingFilters = {}
 
   let query = supabase
     .from("ingestion_listings")
-    .select("id,source,source_id,title,listing_url,category,mrt_area,price,phone,wechat,tags,posted_at,scraped_at,raw_text,is_top,created_at")
+    .select("id,source,source_id,listing_url,detail_url,list_title,list_posted_text,list_price,list_contact,list_raw_html,list_raw_text,raw_detail_html,is_top,scraped_at,created_at")
     .order("scraped_at", { ascending: false })
     .limit(100);
 
   const keyword = value("q");
   if (keyword) {
     const escaped = keyword.replaceAll("%", "\\%").replaceAll("_", "\\_").replaceAll(",", " ");
-    query = query.or(`title.ilike.%${escaped}%,raw_text.ilike.%${escaped}%,source_id.ilike.%${escaped}%,phone.ilike.%${escaped}%,wechat.ilike.%${escaped}%`);
+    query = query.or(`list_title.ilike.%${escaped}%,list_raw_text.ilike.%${escaped}%,source_id.ilike.%${escaped}%,list_contact.ilike.%${escaped}%`);
   }
 
   const source = value("source");
   if (source) query = query.eq("source", source);
 
-  const category = value("category");
-  if (category) query = query.eq("category", category);
-
-  const mrtArea = value("mrt_area");
-  if (mrtArea) query = query.ilike("mrt_area", `%${mrtArea}%`);
-
   if (value("is_top") === "true") query = query.eq("is_top", true);
 
-  const [listings, sources, categories, totalCount, withPriceCount, withContactCount, topCount] = await Promise.all([
+  const [listings, sources, totalCount, withDetailHtmlCount, withListHtmlCount, topCount] = await Promise.all([
     query,
     supabase.from("ingestion_listings").select("source").not("source", "is", null).limit(500),
-    supabase.from("ingestion_listings").select("category").not("category", "is", null).limit(500),
     supabase.from("ingestion_listings").select("id", { count: "exact", head: true }),
-    supabase.from("ingestion_listings").select("id", { count: "exact", head: true }).not("price", "is", null),
-    supabase.from("ingestion_listings").select("id", { count: "exact", head: true }).or("phone.not.is.null,wechat.not.is.null"),
+    supabase.from("ingestion_listings").select("id", { count: "exact", head: true }).not("raw_detail_html", "is", null),
+    supabase.from("ingestion_listings").select("id", { count: "exact", head: true }).not("list_raw_html", "is", null),
     supabase.from("ingestion_listings").select("id", { count: "exact", head: true }).eq("is_top", true)
   ]);
 
   if (listings.error) throw new Error(listings.error.message);
   if (sources.error) throw new Error(sources.error.message);
-  if (categories.error) throw new Error(categories.error.message);
   if (totalCount.error) throw new Error(totalCount.error.message);
-  if (withPriceCount.error) throw new Error(withPriceCount.error.message);
-  if (withContactCount.error) throw new Error(withContactCount.error.message);
+  if (withDetailHtmlCount.error) throw new Error(withDetailHtmlCount.error.message);
+  if (withListHtmlCount.error) throw new Error(withListHtmlCount.error.message);
   if (topCount.error) throw new Error(topCount.error.message);
 
   const sourceOptions = [...new Set((sources.data ?? []).map((row) => row.source).filter(Boolean))].sort();
-  const categoryOptions = [...new Set((categories.data ?? []).map((row) => row.category).filter(Boolean))].sort();
 
   return {
     listings: listings.data ?? [],
     sourceOptions,
-    categoryOptions,
     stats: {
       total: totalCount.count ?? 0,
-      with_price: withPriceCount.count ?? 0,
-      with_contact: withContactCount.count ?? 0,
+      with_detail_html: withDetailHtmlCount.count ?? 0,
+      with_list_html: withListHtmlCount.count ?? 0,
       top: topCount.count ?? 0
     }
   };
@@ -260,13 +248,37 @@ export async function runAdminGeocodingTask(formData: FormData) {
   const supabase = await createClient();
 
   const action = String(formData.get("action") ?? "status");
-  const limit = Number(formData.get("limit") ?? 20);
+  const limit = Number(formData.get("limit") ?? 10);
   const postalCode = String(formData.get("postal_code") ?? "").trim();
+
+  if (action === "retry_failed") {
+    const adminSupabase = createAdminClient();
+    const query = adminSupabase
+      .from("geocoding_cache")
+      .update({
+        status: "pending",
+        error_message: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq("status", "failed");
+
+    const { data, error } = postalCode
+      ? await query.eq("postal_code", postalCode).select("postal_code")
+      : await query.select("postal_code");
+
+    if (error) {
+      redirect(`/admin/geocoding?error=${encodeURIComponent(error.message)}&task=${encodeURIComponent(action)}`);
+    }
+
+    revalidatePath("/admin/geocoding");
+    redirect(`/admin/geocoding?success=1&task=${encodeURIComponent(action)}&enqueued=${data?.length ?? 0}`);
+  }
 
   const body: Record<string, string | number> = {
     action,
-    limit: Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 50) : 20
+    limit: Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 20) : 10
   };
+  if (action === "run" && !postalCode) body.request_delay_ms = 2500;
   if (postalCode) body.postal_code = postalCode;
 
   const { data, error } = await supabase.functions.invoke("admin-geocoding", { body });
@@ -281,6 +293,7 @@ export async function runAdminGeocodingTask(formData: FormData) {
   const synced = typeof data?.synced_listing_count === "number" ? `&synced=${data.synced_listing_count}` : "";
   const refreshed = typeof data?.refreshed_distance_count === "number" ? `&refreshed=${data.refreshed_distance_count}` : "";
   const enqueued = typeof data?.enqueued === "number" ? `&enqueued=${data.enqueued}` : "";
+  const rateLimited = data?.rate_limited ? "&rate_limited=1" : "";
 
-  redirect(`/admin/geocoding?success=1&task=${encodeURIComponent(action)}${processed}${synced}${refreshed}${enqueued}`);
+  redirect(`/admin/geocoding?success=1&task=${encodeURIComponent(action)}${processed}${synced}${refreshed}${enqueued}${rateLimited}`);
 }

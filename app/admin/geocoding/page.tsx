@@ -69,9 +69,16 @@ export default async function AdminGeocodingPage({
 
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <TaskForm action="enqueue" title="扫描邮编" description="从 listing_indexes 扫描有效邮编，加入 geocoding_cache 待处理队列。" button="扫描邮编" />
-          <TaskForm action="run" title="执行地理编码" description="调用 OneMap Search，将 pending 邮编解析成坐标。默认最多处理50个。" button="执行地理编码" showLimit />
+          <TaskForm action="run" title="执行地理编码" description="调用 OneMap Search，将 pending 邮编解析成坐标。默认小批量慢速处理，避免 OneMap 429。" button="执行地理编码" showLimit />
           <TaskForm action="sync" title="同步刷新" description="将缓存坐标同步回房源索引，并刷新学校距离和通勤估算。" button="同步刷新" />
         </div>
+
+        <form action={runAdminGeocodingTask} className="mt-4 rounded-lg border border-line bg-amber-50 p-4">
+          <input type="hidden" name="action" value="retry_failed" />
+          <h3 className="font-semibold text-ink">重试解析失败邮编</h3>
+          <p className="mt-1 text-sm text-muted">将 failed 邮编重新放回待处理队列。适合 OneMap HTTP 429 后隔一段时间再跑。</p>
+          <button type="submit" className="btn-secondary mt-3">重试失败邮编</button>
+        </form>
 
         <form action={runAdminGeocodingTask} className="mt-4 rounded-lg border border-line bg-gray-50 p-4">
           <input type="hidden" name="action" value="run" />
@@ -188,6 +195,7 @@ function TaskResult({ params }: { params: Record<string, string | string[] | und
         {params.processed ? ` · 处理 ${params.processed}` : ""}
         {params.synced ? ` · 同步 ${params.synced}` : ""}
         {params.refreshed ? ` · 刷新 ${params.refreshed}` : ""}
+        {params.rate_limited ? " · OneMap 限流，已暂停批量并保留为待处理" : ""}
       </div>
     );
   }
@@ -216,7 +224,7 @@ function TaskForm({
       {showLimit ? (
         <div className="mt-3">
           <label htmlFor={`${action}-limit`}>处理数量</label>
-          <input id={`${action}-limit`} className="mt-1" name="limit" type="number" min="1" max="50" defaultValue="50" />
+          <input id={`${action}-limit`} className="mt-1" name="limit" type="number" min="1" max="20" defaultValue="10" />
         </div>
       ) : null}
       <button type="submit" className="btn-primary mt-3 w-full">{button}</button>
