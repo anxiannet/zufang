@@ -6,6 +6,7 @@ export type NormalizedRoomType =
   | "small_common_room"
   | "partition_room"
   | "bed_space"
+  | "living_room"
   | "studio"
   | "whole_unit"
   | "unknown";
@@ -135,26 +136,31 @@ function normalizeRoomType(text: string, roomType: string | null): NormalizedRoo
 
   if (/studio|单身公寓|一房一厅/i.test(source)) return "studio";
   if (/整套|整间|整屋|whole\s*(unit|house|flat)|whole unit/i.test(source)) return "whole_unit";
-  if (/床位|搭房|床铺|bed\s*space|bedspace/i.test(source)) return "bed_space";
-  if (/隔间|隔断|partition/i.test(source)) return "partition_room";
-  if (/小普通房|小房间|小房|储藏室|utility\s*room|small\s*(common\s*)?room/i.test(source)) {
+  if (/床位|搭房|床铺|床位出租|bed\s*space|bedspace/i.test(source)) return "bed_space";
+  if (/客厅房|客厅隔间|厅房|厅隔|living\s*room/i.test(source)) return "living_room";
+  if (/隔间|隔断|隔房|partition/i.test(source)) return "partition_room";
+  if (/小普通房|小单人间|小房间|小房|储藏室|utility\s*room|small\s*(common\s*)?room/i.test(source)) {
     return "small_common_room";
   }
-  if (/主人房|主卧|master\s*room/i.test(source)) return "master_room";
-  if (/普通房|客房|common\s*room/i.test(source)) return "common_room";
+  if (/主人房|主卧|套房|master\s*room/i.test(source)) return "master_room";
+  if (/大普通房|普通房|普通间|单间|大房间|房间出租|出租房间|客房|common\s*room/i.test(source)) return "common_room";
   return "unknown";
 }
 
 function detectRoomTypeText(text: string): string | null {
   const patterns = [
     /小普通房/i,
+    /大普通房/i,
     /普通房/i,
-    /主人房|主卧|master\s*room/i,
-    /隔间|隔断|partition/i,
-    /床位|搭房|bed\s*space|bedspace/i,
+    /普通间/i,
+    /主人房|主卧|套房|master\s*room/i,
+    /客厅房|客厅隔间|厅房|厅隔|living\s*room/i,
+    /隔间|隔断|隔房|partition/i,
+    /床位|搭房|床铺|床位出租|bed\s*space|bedspace/i,
     /studio|单身公寓/i,
     /整套|整间|整屋|whole\s*(unit|house|flat)/i,
-    /小房间|小房|utility\s*room|small\s*(common\s*)?room/i
+    /小单人间|小房间|小房|utility\s*room|small\s*(common\s*)?room/i,
+    /大房间|单间|房间出租|出租房间|客房|common\s*room/i
   ];
 
   for (const pattern of patterns) {
