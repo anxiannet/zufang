@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { processNewListings } from "@/src/services/listingPipeline";
 
 export async function publishListing(listingId: string) {
   await requireRole(["admin"]);
@@ -78,6 +79,21 @@ export async function deleteIngestionListing(listingId: string) {
   const { error } = await supabase.from("ingestion_listings").delete().eq("id", listingId);
   if (error) throw new Error(error.message);
   revalidatePath("/admin/ingestion");
+}
+
+export async function processNewIngestionListings() {
+  await requireRole(["admin"]);
+
+  let summary;
+  try {
+    summary = await processNewListings(100);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    redirect(`/admin/ingestion?process_error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/admin/ingestion");
+  redirect(`/admin/ingestion?processed=1&found=${summary.found}&cleaned=${summary.cleaned}&indexed=${summary.indexed}&errors=${summary.errors}`);
 }
 
 export async function getAdminDashboard() {
