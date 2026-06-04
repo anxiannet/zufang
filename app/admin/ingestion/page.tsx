@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { deleteIngestionListing, getIngestionListings } from "@/actions/admin";
+import { deleteIngestionListing, getIngestionListings, processNewIngestionListings } from "@/actions/admin";
 import { getCurrentProfile } from "@/lib/auth";
 
 type PageProps = {
@@ -49,6 +49,8 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
   const q = field(params.q);
   const selectedSource = field(params.source);
   const isTop = field(params.is_top);
+  const processResult = getProcessResult(params);
+  const processError = field(params.process_error);
 
   return (
     <IngestionShell>
@@ -60,10 +62,34 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
             采集数据
           </div>
           <h1 className="mt-2 text-2xl font-bold text-ink">采集房源管理</h1>
-          <p className="mt-2 text-sm text-muted">检查原始抓取质量、原帖链接和详情页 HTML，解析索引在下一步处理。</p>
+          <p className="mt-2 text-sm text-muted">检查原始抓取质量、原帖链接和详情页 HTML。清洗与索引统一通过 Pipeline 处理。</p>
         </div>
-        <Link href="/admin" className="btn-secondary">返回后台</Link>
+        <div className="flex flex-wrap gap-2">
+          <form action={processNewIngestionListings}>
+            <button className="btn-primary" type="submit">处理新房源</button>
+          </form>
+          <Link href="/admin" className="btn-secondary">返回后台</Link>
+        </div>
       </div>
+
+      {processResult ? (
+        <section className="card border border-emerald-200 bg-emerald-50 p-4">
+          <h2 className="font-semibold text-emerald-900">新房源处理完成</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-4">
+            <Metric label="发现" value={processResult.found} />
+            <Metric label="成功清洗" value={processResult.cleaned} />
+            <Metric label="成功索引" value={processResult.indexed} />
+            <Metric label="错误" value={processResult.errors} />
+          </div>
+        </section>
+      ) : null}
+
+      {processError ? (
+        <section className="card border border-red-200 bg-red-50 p-4">
+          <h2 className="font-semibold text-red-900">处理失败</h2>
+          <p className="mt-2 text-sm text-red-800">{processError}</p>
+        </section>
+      ) : null}
 
       <section className="grid gap-3 md:grid-cols-4">
         <Metric label="抓取总数" value={data.stats.total} />
@@ -186,6 +212,21 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 function field(value: string | string[] | undefined) {
   return Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "");
+}
+
+function numberField(value: string | string[] | undefined) {
+  const parsed = Number(field(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getProcessResult(params: Record<string, string | string[] | undefined>) {
+  if (field(params.processed) !== "1") return null;
+  return {
+    found: numberField(params.found),
+    cleaned: numberField(params.cleaned),
+    indexed: numberField(params.indexed),
+    errors: numberField(params.errors)
+  };
 }
 
 function formatDate(value: string | null) {
