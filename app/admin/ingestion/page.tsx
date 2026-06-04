@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { deleteIngestionListing, getIngestionListings, processNewIngestionListings } from "@/actions/admin";
+import { rebuildListingPipeline } from "@/actions/rebuildListingPipeline";
 import { getCurrentProfile } from "@/lib/auth";
 
 type PageProps = {
@@ -50,7 +51,9 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
   const selectedSource = field(params.source);
   const isTop = field(params.is_top);
   const processResult = getProcessResult(params);
+  const rebuildResult = getRebuildResult(params);
   const processError = field(params.process_error);
+  const rebuildError = field(params.rebuild_error);
 
   return (
     <IngestionShell>
@@ -68,6 +71,11 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
           <form action={processNewIngestionListings}>
             <button className="btn-primary" type="submit">处理新房源</button>
           </form>
+          <form action={rebuildListingPipeline}>
+            <button className="btn-secondary border-red-200 bg-red-50 text-red-700 hover:bg-red-100" type="submit">
+              重建全部索引
+            </button>
+          </form>
           <Link href="/admin" className="btn-secondary">返回后台</Link>
         </div>
       </div>
@@ -84,10 +92,31 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
         </section>
       ) : null}
 
+      {rebuildResult ? (
+        <section className="card border border-blue-200 bg-blue-50 p-4">
+          <h2 className="font-semibold text-blue-900">全部索引重建完成</h2>
+          <p className="mt-1 text-sm text-blue-800">已从 ingestion_listings 重新生成 listing_clean 与 listing_indexes。</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-5">
+            <Metric label="发现" value={rebuildResult.found} />
+            <Metric label="成功清洗" value={rebuildResult.cleaned} />
+            <Metric label="成功索引" value={rebuildResult.indexed} />
+            <Metric label="无效房源" value={rebuildResult.invalid} />
+            <Metric label="错误" value={rebuildResult.errors} />
+          </div>
+        </section>
+      ) : null}
+
       {processError ? (
         <section className="card border border-red-200 bg-red-50 p-4">
           <h2 className="font-semibold text-red-900">处理失败</h2>
           <p className="mt-2 text-sm text-red-800">{processError}</p>
+        </section>
+      ) : null}
+
+      {rebuildError ? (
+        <section className="card border border-red-200 bg-red-50 p-4">
+          <h2 className="font-semibold text-red-900">重建失败</h2>
+          <p className="mt-2 text-sm text-red-800">{rebuildError}</p>
         </section>
       ) : null}
 
@@ -225,6 +254,17 @@ function getProcessResult(params: Record<string, string | string[] | undefined>)
     found: numberField(params.found),
     cleaned: numberField(params.cleaned),
     indexed: numberField(params.indexed),
+    errors: numberField(params.errors)
+  };
+}
+
+function getRebuildResult(params: Record<string, string | string[] | undefined>) {
+  if (field(params.rebuilt) !== "1") return null;
+  return {
+    found: numberField(params.found),
+    cleaned: numberField(params.cleaned),
+    indexed: numberField(params.indexed),
+    invalid: numberField(params.invalid),
     errors: numberField(params.errors)
   };
 }
