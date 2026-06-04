@@ -3,10 +3,7 @@ import { createHash } from "node:crypto";
 export type NormalizedRoomType =
   | "master_room"
   | "common_room"
-  | "small_common_room"
   | "partition_room"
-  | "bed_space"
-  | "studio"
   | "whole_unit"
   | "unknown";
 
@@ -15,6 +12,8 @@ export type RentalBoolean = boolean | null;
 export interface SemanticRentalFields {
   roomType: string | null;
   normalizedRoomType: NormalizedRoomType;
+  isInvalidListing: boolean;
+  invalidReasons: string[];
   availableFrom: Date | null;
   cookingAllowed: RentalBoolean;
   canRegisterAddress: RentalBoolean;
@@ -55,6 +54,7 @@ export function parseSemanticRentalFields(input: ParseInput): SemanticRentalFiel
     input.rawDetailText
   ].filter(Boolean).join("\n"));
 
+  const invalidReasons = detectInvalidReasons(text);
   const roomType = detectRoomTypeText(text);
   const normalizedRoomType = normalizeRoomType(text, roomType);
   const availableFrom = detectAvailableFrom(text);
@@ -81,6 +81,8 @@ export function parseSemanticRentalFields(input: ParseInput): SemanticRentalFiel
   return {
     roomType,
     normalizedRoomType,
+    isInvalidListing: invalidReasons.length > 0,
+    invalidReasons,
     availableFrom,
     cookingAllowed,
     canRegisterAddress,
@@ -105,7 +107,8 @@ export function parseSemanticRentalFields(input: ParseInput): SemanticRentalFiel
       body_text: input.bodyText,
       raw_detail_text: input.rawDetailText,
       detail_url: input.detailUrl,
-      semantic_text: text
+      semantic_text: text,
+      invalid_reasons: invalidReasons
     }
   };
 }
@@ -130,31 +133,32 @@ export function buildListingFingerprint(input: {
   return createHash("sha256").update(normalized).digest("hex");
 }
 
+function detectInvalidReasons(text: string): string[] {
+  const reasons: string[] = [];
+  if (/床位|搭房|搭铺|床铺|床位出租|bed\s*space|bedspace/i.test(text)) reasons.push("bedspace_or_shared_bed");
+  if (/日租|按天租|短租几天|小时房|daily\s*(rental|stay)|hourly/i.test(text)) reasons.push("daily_or_hourly_rental");
+  return reasons;
+}
+
 function normalizeRoomType(text: string, roomType: string | null): NormalizedRoomType {
   const source = `${roomType ?? ""}\n${text}`;
 
-  if (/studio|单身公寓|一房一厅/i.test(source)) return "studio";
   if (/整套|整间|整屋|whole\s*(unit|house|flat)|whole unit/i.test(source)) return "whole_unit";
-  if (/床位|搭房|床铺|bed\s*space|bedspace/i.test(source)) return "bed_space";
-  if (/隔间|隔断|partition/i.test(source)) return "partition_room";
-  if (/小普通房|小房间|小房|储藏室|utility\s*room|small\s*(common\s*)?room/i.test(source)) {
-    return "small_common_room";
+  if (/主人房|主卧|套房|master\s*room/i.test(source)) return "master_room";
+  if (/普通房|普通间|大普通房|小普通房|客房|common\s*room/i.test(source)) return "common_room";
+  if (/单人间|小单人间|隔间|隔断|隔房|客厅房|客厅隔间|厅房|厅隔|佣人房|佣人间|储藏室|储物间|杂物房|utility\s*room|bomb\s*shelter|partition/i.test(source)) {
+    return "partition_room";
   }
-  if (/主人房|主卧|master\s*room/i.test(source)) return "master_room";
-  if (/普通房|客房|common\s*room/i.test(source)) return "common_room";
   return "unknown";
 }
 
 function detectRoomTypeText(text: string): string | null {
   const patterns = [
-    /小普通房/i,
-    /普通房/i,
-    /主人房|主卧|master\s*room/i,
-    /隔间|隔断|partition/i,
-    /床位|搭房|bed\s*space|bedspace/i,
-    /studio|单身公寓/i,
+    /主人房|主卧|套房|master\s*room/i,
+    /大普通房|小普通房|普通房|普通间|客房|common\s*room/i,
+    /单人间|小单人间|隔间|隔断|隔房|客厅房|客厅隔间|厅房|厅隔|佣人房|佣人间|储藏室|储物间|杂物房|utility\s*room|bomb\s*shelter|partition/i,
     /整套|整间|整屋|whole\s*(unit|house|flat)/i,
-    /小房间|小房|utility\s*room|small\s*(common\s*)?room/i
+    /床位|搭房|搭铺|床铺|床位出租|bed\s*space|bedspace/i
   ];
 
   for (const pattern of patterns) {

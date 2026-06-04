@@ -47,7 +47,19 @@ export function cleanListing(row: IngestionListingRow): ListingCleanInsertRow | 
     detailUrl: source.detailUrl
   });
 
-  const status: ListingIndexRow["status"] = row.removed_from_source ? "removed" : source.bodyText ? "active" : "invalid";
+  const status: ListingIndexRow["status"] = row.removed_from_source
+    ? "removed"
+    : semantic.isInvalidListing || !source.bodyText
+      ? "invalid"
+      : "active";
+
+  if (semantic.isInvalidListing) {
+    logger.skip("listing marked invalid", {
+      source: row.source,
+      source_id: row.source_id,
+      reasons: semantic.invalidReasons.join(",")
+    });
+  }
 
   return {
     ingestion_listing_id: String(row.id),
