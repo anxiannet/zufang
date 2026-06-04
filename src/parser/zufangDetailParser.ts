@@ -111,7 +111,7 @@ function pruneNoiseElements($: cheerio.CheerioAPI): void {
   });
 }
 
-function countListingLinks($: cheerio.CheerioAPI, node: cheerio.Cheerio<cheerio.Element>): number {
+function countListingLinks($: cheerio.CheerioAPI, node: cheerio.Cheerio<any>): number {
   const links = node.find("a[href]").toArray();
   return links.filter((link) => {
     const href = $(link).attr("href") ?? "";
@@ -178,135 +178,69 @@ function extractTags($: cheerio.CheerioAPI, text: string): string[] {
     .map((node) => cleanText($(node).text()))
     .filter((value) => knownTags.includes(value));
   const textTags = knownTags.filter((tag) => text.includes(tag));
-  return Array.from(new Set([...domTags, ...textTags]));
+  return [...new Set([...domTags, ...textTags])];
 }
 
 function extractLabeledValue(text: string, label: string): string | null {
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`(?:^|\\n|\\s)${escaped}\\s*[:：]?\\s*([^\\n]+)`);
+  const regex = new RegExp(`${label}\\s*[:：]?\\s*([^\\n]+)`);
   const match = text.match(regex);
-  if (!match) return null;
-
-  const rawValue = match[1].split(nextLabelPattern)[0] ?? "";
-  const value = cleanText(rawValue).replace(/^(分类|标签|地铁|价格|联系|微信|电话)\s*/, "").trim();
-  return value || null;
+  if (!match?.[1]) return null;
+  const value = match[1].split(nextLabelPattern)[0]?.trim();
+  return value ? cleanText(value) : null;
 }
 
 function extractLabeledPrice(text: string): number | null {
   const value = extractLabeledValue(text, "价格");
-  if (!value) return null;
-  const match = value.match(/\$?\s*([\d,]{3,6})/);
-  if (!match) return null;
-  const price = Number.parseInt(match[1].replace(/,/g, ""), 10);
-  return price >= 300 && price <= 20_000 ? price : null;
+  return value ? extractPrice(value) : null;
 }
 
 function extractMrtArea(text: string): string | null {
-  const labeled = extractLabeledValue(text, "地铁");
-  if (labeled) return normalizeMrtArea(labeled);
-
-  const match = text.match(/([A-Z][A-Za-z ]{2,30},\s*[\u4e00-\u9fa5]{1,8})/);
-  return match ? normalizeMrtArea(match[1]) : null;
-}
-
-function normalizeMrtArea(value: string): string {
-  return cleanText(value)
-    .replace(/\s+(?:价格|联系|微信|电话|私信).*$/i, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-function extractCeaRegNo(text: string): string | null {
-  const match = text.match(/CEA\s*(?:REG(?:ISTRATION)?\s*)?NO\.?\s*[:：]?\s*([A-Z]\d{6}[A-Z]?)/i);
-  return match?.[1] ?? null;
+  const match = text.match(/([A-Za-z][A-Za-z\s]+,\s*[\u4e00-\u9fa5]{1,6})/);
+  return match?.[1] ? cleanText(match[1]) : null;
 }
 
 function extractBodyText($: cheerio.CheerioAPI, rawText: string): string | null {
-  const selectors = [".field-name-body", ".node-content", ".content .body", ".post-content", "article", "main"];
-
-  const candidate = selectors
+  const contentSelectors = ["article", ".node-content", ".post-content", ".field-name-body", ".content .body", "main"];
+  const bodyCandidate = contentSelectors
     .map((selector) => cleanMultilineText($(selector).first().text()))
     .filter((value) => value.length > 30)
-    .sort((a, b) => scoreDetailText(b) - scoreDetailText(a))[0] ?? rawText;
+    .sort((a, b) => b.length - a.length)[0] ?? rawText;
 
-  const body = cleanDetailLines(candidate, { keepStructure: false });
-  return body || null;
+  const lines = cleanDetailLines(bodyCandidate, { keepStructure: false })
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !isStructureLine(line))
+    .filter((line) => !isNoiseLine(line));
+
+  const value = lines.join("\n").trim();
+  return value || null;
 }
 
 function cleanDetailLines(text: string, options: { keepStructure: boolean }): string {
-  const lines = text.split(/\n+/).map((line) => cleanText(line)).filter(Boolean);
-  const bodyLines: string[] = [];
-  let seenLikelyBody = false;
+  const lines = cleanMultilineText(text)
+    .split(/\n+/)
+    .map((line) => cleanText(line))
+    .filter(Boolean);
 
-  for (const line of lines) {
-    if (bodyStopPatterns.some((pattern) => pattern.test(line))) break;
-    if (isNoiseLine(line)) continue;
-    if (!options.keepStructure && isStructureLine(line)) continue;
-    if (!seenLikelyBody && !options.keepStructure && line.length < 5) continue;
-
-    seenLikelyBody = true;
-    bodyLines.push(line);
-  }
-
-  return cleanMultilineText(dedupeConsecutiveLines(bodyLines).join("\n"));
-}
-
-function dedupeConsecutiveLines(lines: string[]): string[] {
   const result: string[] = [];
   for (const line of lines) {
-    if (result[result.length - 1] !== line) result.push(line);
+    if (isNoiseLine(line)) continue;
+    if (!options.keepStructure && isStructureLine(line)) continue;
+    result.push(line);
   }
-  return result;
-}
-
-function isNoiseLine(line: string): boolean {
-  return [
-    /相关广告/,
-    /相关推荐/,
-    /相关房源/,
-    /类似房源/,
-    /热门房源/,
-    /最新房源/,
-    /推荐房源/,
-    /猜你喜欢/,
-    /更多房源/,
-    /附近房源/,
-    /^\$?\d+[\d,]*\s*普通房.*\d{6,}/,
-    /^\$?\d+[\d,]*\s*主人房.*\d{6,}/,
-    /^\$?\d+[\d,]*\s*隔间.*\d{6,}/,
-    /^\d+\s*小时前.*出租/,
-    /^\d+\s*分钟前.*出租/,
-    /^置顶.*出租/,
-    /^收藏$/,
-    /^分享$/,
-    /^举报$/,
-    /^发布$/,
-    /^返回$/,
-    /^加载更多$/
-  ].some((pattern) => pattern.test(line));
+  return result.join("\n");
 }
 
 function isStructureLine(line: string): boolean {
-  return [
-    /^首页$/,
-    /^租房$/,
-    /^单间租房\s*\/\s*编号/,
-    /^整套租房\s*\/\s*编号/,
-    /^床位出租\s*\/\s*编号/,
-    /^编号\s*\d+$/,
-    /^日期\s*[:：]?/,
-    /^分类\s*[:：]?/,
-    /^标签\s*[:：]?/,
-    /^地铁\s*[:：]?/,
-    /^价格\s*[:：]?/,
-    /^联系\s*[:：]?/,
-    /^电话\s*[:：]?/,
-    /^微信\s*[:：]?/
-  ].some((pattern) => pattern.test(line));
+  return /^(编号|日期|分类|标签|地铁|价格|联系|微信|电话|私信)\s*[:：]?/.test(line) || /^给作者发私信$/.test(line);
 }
 
-export const detailParserInternals = {
-  extractCeaRegNo,
-  extractBodyText,
-  extractRelevantDetailText
-};
+function isNoiseLine(line: string): boolean {
+  return bodyStopPatterns.some((pattern) => pattern.test(line));
+}
+
+function extractCeaRegNo(text: string): string | null {
+  const match = text.match(/\b[RS]\d{7}[A-Z]\b/i);
+  return match?.[0]?.toUpperCase() ?? null;
+}
