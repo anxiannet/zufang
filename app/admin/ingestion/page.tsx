@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { deleteIngestionListing, getIngestionListings, processNewIngestionListings } from "@/actions/admin";
-import { rebuildListingPipeline } from "@/actions/rebuildListingPipeline";
+import { getListingPipelineStats, rebuildListingPipeline } from "@/actions/rebuildListingPipeline";
 import { getCurrentProfile } from "@/lib/auth";
 
 type PageProps = {
@@ -45,7 +45,10 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
     );
   }
 
-  const data = await getIngestionListings(params);
+  const [data, pipelineStats] = await Promise.all([
+    getIngestionListings(params),
+    getListingPipelineStats()
+  ]);
   const listings = data.listings as IngestionListingRow[];
   const q = field(params.q);
   const selectedSource = field(params.source);
@@ -119,6 +122,27 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
           <p className="mt-2 text-sm text-red-800">{rebuildError}</p>
         </section>
       ) : null}
+
+      <section className="card p-4">
+        <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="font-semibold text-ink">Pipeline 健康状态</h2>
+            <p className="mt-1 text-sm text-muted">listing_indexes 应只来自 active 的 listing_clean；Diff 和 Orphan 应保持 0。</p>
+          </div>
+          <div className={pipelineStats.diff === 0 && pipelineStats.orphanIndexes === 0 ? "text-sm font-semibold text-emerald-700" : "text-sm font-semibold text-red-700"}>
+            {pipelineStats.diff === 0 && pipelineStats.orphanIndexes === 0 ? "健康" : "需要检查"}
+          </div>
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-7">
+          <Metric label="Clean" value={pipelineStats.clean} />
+          <Metric label="Index" value={pipelineStats.indexes} />
+          <Metric label="Active" value={pipelineStats.active} />
+          <Metric label="Invalid" value={pipelineStats.invalid} />
+          <Metric label="Removed" value={pipelineStats.removed} />
+          <Metric label="Orphan" value={pipelineStats.orphanIndexes} />
+          <Metric label="Diff" value={pipelineStats.diff} />
+        </div>
+      </section>
 
       <section className="grid gap-3 md:grid-cols-4">
         <Metric label="抓取总数" value={data.stats.total} />
