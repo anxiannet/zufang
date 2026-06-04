@@ -285,7 +285,14 @@ export function cleanListing(row: IngestionListingRow): ListingCleanInsertRow | 
 }
 
 export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
-  const searchText = buildSearchText({
+  const nearNtu = isNearNtu(cleanRow);
+  const ntuScore = scoreNtuFit(cleanRow);
+  const studentFriendly = isStudentFriendly(cleanRow);
+  const matchReasons = buildMatchReasons(cleanRow);
+  const schoolFitTags = buildSchoolFitTags(cleanRow, { nearNtu, studentFriendly });
+  const semanticTags = buildSemanticTags(cleanRow, { nearNtu, studentFriendly, schoolFitTags });
+
+  const baseSearchText = buildSearchText({
     title: cleanRow.title,
     category: cleanRow.category,
     mrtArea: cleanRow.mrt_area,
@@ -298,6 +305,13 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
     addressText: cleanRow.address_text,
     postalCode: cleanRow.postal_code
   });
+
+  const searchText = cleanMultilineText([
+    baseSearchText,
+    matchReasons.join(" "),
+    schoolFitTags.join(" "),
+    semanticTags.join(" ")
+  ].filter(Boolean).join("\n"));
 
   return {
     source: cleanRow.source,
@@ -321,10 +335,12 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
     postal_code: cleanRow.postal_code,
     fingerprint: cleanRow.fingerprint,
     indexed_at: new Date().toISOString(),
-    near_ntu: isNearNtu(cleanRow),
-    ntu_score: scoreNtuFit(cleanRow),
-    student_friendly: isStudentFriendly(cleanRow),
-    match_reasons: buildMatchReasons(cleanRow),
+    near_ntu: nearNtu,
+    ntu_score: ntuScore,
+    student_friendly: studentFriendly,
+    match_reasons: matchReasons,
+    school_fit_tags: schoolFitTags,
+    semantic_tags: semanticTags,
     status: cleanRow.status
   };
 }
@@ -494,6 +510,51 @@ function buildMatchReasons(row: ListingCleanRow): string[] {
   if (row.cooking_allowed) reasons.push("cooking_allowed");
   if (row.can_register_address) reasons.push("can_register_address");
   return reasons;
+}
+
+function buildSchoolFitTags(row: ListingCleanRow, context: { nearNtu: boolean; studentFriendly: boolean }): string[] {
+  const tags = new Set<string>();
+  const text = `${row.title}\n${row.mrt_area ?? ""}\n${row.clean_text ?? row.body_text ?? ""}\n${row.address_text ?? ""}`;
+
+  if (context.nearNtu || /ntu|南洋理工|boon lay|pioneer|jurong|lakeside|文礼|先驱|裕廊/i.test(text)) tags.add("NTU");
+  if (/nus|国大|kent ridge|clementi|dover|one-north|金文泰/i.test(text)) tags.add("NUS");
+  if (/smu|管理大学|bras basah|dhoby ghaut|bugis|city hall/i.test(text)) tags.add("SMU");
+  if (/sutd|科技设计大学|expo|upper changi|simei|tampines/i.test(text)) tags.add("SUTD");
+  if (/student|学生|留学|大学|school|campus/i.test(text)) tags.add("STUDENT");
+  if (context.studentFriendly) tags.add("STUDENT_FRIENDLY");
+
+  return Array.from(tags);
+}
+
+function buildSemanticTags(row: ListingCleanRow, context: { nearNtu: boolean; studentFriendly: boolean; schoolFitTags: string[] }): string[] {
+  const tags = new Set<string>();
+
+  if (row.normalized_room_type === "master_room") tags.add("MASTER_ROOM");
+  if (row.normalized_room_type === "common_room") tags.add("COMMON_ROOM");
+  if (row.normalized_room_type === "bedspace") tags.add("BEDSPACE");
+  if (row.normalized_room_type === "whole_unit") tags.add("WHOLE_UNIT");
+
+  if (row.cooking_allowed === true) tags.add("COOKING_ALLOWED");
+  if (row.can_register_address === true) tags.add("REGISTER_ADDRESS");
+  if (row.landlord_stay === true) tags.add("LANDLORD_STAY");
+  if (row.landlord_stay === false) tags.add("NO_LANDLORD");
+
+  if (row.gender_preference === "female") tags.add("FEMALE_ONLY");
+  if (row.gender_preference === "male") tags.add("MALE_ONLY");
+  if (row.amenities.includes("near_mrt")) tags.add("NEAR_MRT");
+
+  if (row.price !== null && row.price <= 900) tags.add("LOW_BUDGET");
+  if (row.price !== null && row.price > 900 && row.price <= 1500) tags.add("MID_BUDGET");
+  if (row.price !== null && row.price > 1500) tags.add("HIGH_BUDGET");
+
+  if (context.studentFriendly) tags.add("STUDENT_FRIENDLY");
+  if (context.nearNtu) tags.add("NTU_FRIENDLY");
+  if (context.schoolFitTags.includes("NTU")) tags.add("NTU_MATCH");
+  if (context.schoolFitTags.includes("NUS")) tags.add("NUS_MATCH");
+  if (context.schoolFitTags.includes("SMU")) tags.add("SMU_MATCH");
+  if (context.schoolFitTags.includes("SUTD")) tags.add("SUTD_MATCH");
+
+  return Array.from(tags);
 }
 
 function normalizeLimit(value: number | undefined): number {
