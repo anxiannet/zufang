@@ -133,5 +133,7 @@ export interface ListingIndexRow {
   ntu_score: number;
   student_friendly: boolean;
   match_reasons: string[];
+  school_fit_tags: string[];
+  semantic_tags: string[];
   status: "active" | "removed" | "invalid";
 }
