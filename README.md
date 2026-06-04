@@ -27,6 +27,8 @@
 - 后台状态页：`/admin/crawler` 显示最近 20 次 `crawl_jobs`，不在前端暴露 `CRON_SECRET`。
 - 爬虫入口：`src/crawler/zufangCrawler.ts` 导出 `crawlZufangRecentListings`。
 - 本地手动测试：`npm run crawl:local`。
+- 采集源：`CRAWL_SOURCE=zufang.sg` 或 `CRAWL_SOURCE=shichengbbs.com`。
+- `shichengbbs.com` 默认优先采集裕廊东、裕华园、湖畔、文礼、先驱、裕群区域；可用 `CRAWL_ENTRY_URL` 临时覆盖入口 URL。
 
 Vercel Serverless Function 不适合长时间爬取，默认每次最多抓 5 页，成功新增 50 条符合最近 3 天条件的原始房源后停止；详情页处理保留 200 个安全上限，详情并发为 2。超过限制会停止本次任务，明天继续。
 
@@ -68,6 +70,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SECRET_KEY=
 CRON_SECRET=
 DATABASE_URL=
+CRAWL_SOURCE=zufang.sg
+CRAWL_ENTRY_URL=
 CRAWL_DAYS=3
 MAX_PAGES_PER_RUN=5
 MAX_INSERTED_PER_RUN=50

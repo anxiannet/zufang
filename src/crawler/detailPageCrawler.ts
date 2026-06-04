@@ -3,6 +3,7 @@ import { config } from "../utils/config";
 import { randomDelay } from "../utils/sleep";
 import { logger } from "../utils/logger";
 import { fetchHtmlWithStatus, HttpStatusError } from "./httpClient";
+import { getHtmlListingExclusionMatch } from "./listingExclusion";
 import { saveRawDetail } from "./rawStore";
 
 export async function crawlDetailPage(listing: ListListing, page: number): Promise<RawDetailListing | null> {
@@ -19,6 +20,18 @@ export async function crawlDetailPage(listing: ListListing, page: number): Promi
     });
 
     const { html } = await fetchHtmlWithStatus(listing.detailUrl, config.maxRetries);
+    const exclusion = getHtmlListingExclusionMatch(html);
+    if (exclusion.excluded) {
+      logger.skip("[DETAIL_EXCLUDED]", {
+        source_id: listing.sourceId,
+        detail_url: listing.detailUrl,
+        page,
+        keyword: exclusion.keyword,
+        elapsed_ms: Date.now() - started
+      });
+      return null;
+    }
+
     const detail: RawDetailListing = {
       source: listing.source,
       sourceId: listing.sourceId,

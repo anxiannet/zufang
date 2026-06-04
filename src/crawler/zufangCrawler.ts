@@ -8,6 +8,7 @@ import { logger } from "../utils/logger";
 import { isOlderThanDays } from "../parser/timeParser";
 import { crawlDetailPage } from "./detailPageCrawler";
 import { crawlListPage } from "./listPageCrawler";
+import { getListingExclusionMatch } from "./listingExclusion";
 import { saveRawListItem } from "./rawStore";
 
 type CrawlOptions = {
@@ -111,6 +112,19 @@ async function crawlZufangInternal(options: Required<CrawlOptions>): Promise<Cra
 
     for (const listing of parsed.listings) {
       stats.listingsParsed += 1;
+
+      const listExclusion = getListingExclusionMatch(`${listing.listTitle ?? ""} ${listing.listRawText}`);
+      if (listExclusion.excluded) {
+        stats.listingsSkipped += 1;
+        logger.skip("listing excluded before detail fetch", {
+          page,
+          source_id: listing.sourceId,
+          detail_url: listing.detailUrl,
+          keyword: listExclusion.keyword
+        });
+        continue;
+      }
+
       await saveRawListItem(listing);
 
       if (listing.listPostedAt && isOlderThanDays(listing.listPostedAt, crawlDays)) {

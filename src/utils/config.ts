@@ -20,7 +20,7 @@ const crawlSources: Record<CrawlSourceName, {
   "shichengbbs.com": {
     source: "shichengbbs.com",
     baseUrl: "https://www.shichengbbs.com",
-    entryUrl: "https://www.shichengbbs.com/c15",
+    entryUrl: "https://www.shichengbbs.com/c15?area_ids%5B0%5D=10&area_ids%5B1%5D=65&area_ids%5B2%5D=90&area_ids%5B3%5D=50&area_ids%5B4%5D=25&area_ids%5B5%5D=144",
     category: "单间租房"
   }
 };
@@ -37,7 +37,7 @@ export const config = {
   maxDetailsPerRun: Number.parseInt(process.env.MAX_DETAILS_PER_RUN ?? "200", 10),
   maxInsertedPerRun: Number.parseInt(process.env.MAX_INSERTED_PER_RUN ?? "50", 10),
   baseUrl: crawlSource.baseUrl,
-  entryUrl: crawlSource.entryUrl,
+  entryUrl: process.env.CRAWL_ENTRY_URL ?? crawlSource.entryUrl,
   source: crawlSource.source,
   category: crawlSource.category,
   listingTableName: process.env.INGESTION_TABLE_NAME ?? "ingestion_listings",
