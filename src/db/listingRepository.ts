@@ -94,7 +94,6 @@ function toRawListingRow(input: RawListingInput): Record<string, unknown> {
     listing_url: detail.detailUrl,
     detail_url: detail.detailUrl,
     list_title: list.listTitle,
-    list_posted_text: list.listPostedText,
     list_price: list.listPrice,
     list_contact: list.listContact,
     list_raw_html: list.listRawHtml,

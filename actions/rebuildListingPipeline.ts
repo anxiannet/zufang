@@ -53,7 +53,7 @@ async function rebuildAllListingsFromIngestion(): Promise<RebuildSummary> {
     const { data: rows, error } = await supabase
       .from("ingestion_listings")
       .select(
-        "id,source,source_id,listing_url,detail_url,list_title,list_posted_text,list_price,list_contact,list_raw_html,list_raw_text,raw_detail_html,is_top,removed_from_source,scraped_at,created_at"
+        "id,source,source_id,listing_url,detail_url,list_title,list_price,list_contact,list_raw_html,list_raw_text,raw_detail_html,is_top,removed_from_source,scraped_at,created_at"
       )
       .order("scraped_at", { ascending: true, nullsFirst: false })
       .range(from, from + BATCH_SIZE - 1);

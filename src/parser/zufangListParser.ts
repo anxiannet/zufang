@@ -5,7 +5,7 @@ import { ListListing } from "../models/listing";
 import { extractPhone, extractWechat } from "./contactParser";
 import { cleanText, extractPrice } from "../utils/textClean";
 import { config } from "../utils/config";
-import { parsePostedAt, parsePostedText } from "./timeParser";
+import { parsePostedAt } from "./timeParser";
 
 const tagWords = new Set([
   "近地铁",
@@ -147,8 +147,7 @@ function parseListingNode($: cheerio.CheerioAPI, node: Cheerio<AnyNode>): ListLi
   const rawHtml = $.html(node);
   const rawText = cleanText(node.text());
   const tags = extractTags($, node);
-  const postedText = parsePostedText(rawText);
-  const postedAt = parsePostedAt(postedText ?? rawText);
+  const postedAt = parsePostedAt(rawText);
   const contacts = extractContacts($, node, rawText);
 
   return {
@@ -156,7 +155,6 @@ function parseListingNode($: cheerio.CheerioAPI, node: Cheerio<AnyNode>): ListLi
     sourceId,
     detailUrl,
     listTitle: title,
-    listPostedText: postedText,
     listPrice: extractPrice(rawText),
     listContact: contacts.contactText,
     listRawText: rawText,

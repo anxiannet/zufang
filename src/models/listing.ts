@@ -3,7 +3,6 @@ export interface ListListing {
   sourceId: string;
   detailUrl: string;
   listTitle: string | null;
-  listPostedText: string | null;
   listPrice: number | null;
   listContact: string | null;
   listRawHtml: string;
@@ -52,7 +51,6 @@ export interface Listing extends DetailListing {
   detailUrl: string;
   listingUrl: string;
   listTitle: string | null;
-  listPostedText: string | null;
   listPrice: number | null;
   listContact: string | null;
   listRawHtml: string;
@@ -111,7 +109,6 @@ export interface IngestionListingRow {
   listing_url: string | null;
   detail_url: string | null;
   list_title: string | null;
-  list_posted_text: string | null;
   list_price: number | null;
   list_contact: string | null;
   list_raw_html: string | null;

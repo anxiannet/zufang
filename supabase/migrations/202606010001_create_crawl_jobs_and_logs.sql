@@ -38,7 +38,6 @@ create unique index if not exists ingestion_listings_source_source_id_uidx
 
 alter table public.ingestion_listings add column if not exists detail_url text;
 alter table public.ingestion_listings add column if not exists list_title text;
-alter table public.ingestion_listings add column if not exists list_posted_text text;
 alter table public.ingestion_listings add column if not exists list_price integer;
 alter table public.ingestion_listings add column if not exists list_contact text;
 alter table public.ingestion_listings add column if not exists list_raw_html text;

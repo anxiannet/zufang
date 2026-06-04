@@ -48,7 +48,6 @@ async function fetchIngestionListings(options: {
       "listing_url",
       "detail_url",
       "list_title",
-      "list_posted_text",
       "list_price",
       "list_contact",
       "list_raw_html",

@@ -22,7 +22,7 @@ export async function crawlListPage(pageUrl: string, page: number): Promise<Pars
       page,
       source_id: listing.sourceId,
       detail_url: listing.detailUrl,
-      reason: listing.listPostedText ?? "posted_at_unknown",
+      reason: listing.listPostedAt?.toISOString() ?? "posted_at_unknown",
       elapsed_ms: Date.now() - started
     });
   }

@@ -145,7 +145,7 @@ export async function getIngestionListings(filters: IngestionListingFilters = {}
 
   let query = supabase
     .from("ingestion_listings")
-    .select("id,source,source_id,listing_url,detail_url,list_title,list_posted_text,list_price,list_contact,list_raw_html,list_raw_text,raw_detail_html,is_top,scraped_at,created_at")
+    .select("id,source,source_id,listing_url,detail_url,list_title,list_price,list_contact,list_raw_html,list_raw_text,raw_detail_html,is_top,scraped_at,created_at")
     .order("scraped_at", { ascending: false })
     .limit(100);
 

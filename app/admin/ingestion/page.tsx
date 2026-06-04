@@ -14,7 +14,6 @@ type IngestionListingRow = {
   listing_url: string | null;
   detail_url: string | null;
   list_title: string | null;
-  list_posted_text: string | null;
   list_price: number | null;
   list_contact: string | null;
   list_raw_html: string | null;
@@ -180,15 +179,13 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
                   <td className="px-4 py-3">
                     <div className="font-semibold text-ink">{listing.list_price ? `$${listing.list_price}` : "价格未识别"}</div>
                     <div className="mt-1 text-muted">{listing.list_contact ?? "联系方式未识别"}</div>
-                    <div className="mt-1 text-xs text-muted">列表发布时间：{listing.list_posted_text ?? "-"}</div>
                   </td>
                   <td className="px-4 py-3">
                     <div>详情：{listing.raw_detail_html ? "已保存" : "缺失"}</div>
                     <div className="mt-1">列表：{listing.list_raw_html ? "已保存" : "缺失"}</div>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    <div>列表：{listing.list_posted_text ?? "-"}</div>
-                    <div className="mt-1">抓取：{formatDate(listing.scraped_at)}</div>
+                    <div>抓取：{formatDate(listing.scraped_at)}</div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
