@@ -27,15 +27,14 @@
 - 后台状态页：`/admin/crawler` 显示最近 20 次 `crawl_jobs`，不在前端暴露 `CRON_SECRET`。
 - 爬虫入口：`src/crawler/zufangCrawler.ts` 导出 `crawlZufangRecentListings`。
 - 本地手动测试：`npm run crawl:local`。
-- 本地解析索引：`npm run index:listings`，从 `ingestion_listings.raw_detail_html` 解析并写入 `listing_indexes`。
 
 Vercel Serverless Function 不适合长时间爬取，默认每次最多抓 5 页，成功新增 50 条符合最近 3 天条件的原始房源后停止；详情页处理保留 200 个安全上限，详情并发为 2。超过限制会停止本次任务，明天继续。
 
-采集任务成功保存 raw HTML 后，会自动执行后处理流水线：
+采集任务成功保存 raw HTML 后直接结束，不在本地触发解析、清理、索引或地理编码。后续处理由服务端任务分步执行：
 
-1. 解析详情页 HTML、清理/结构化字段，并写入 `listing_indexes`
-2. 扫描索引中的邮编并加入 `geocoding_cache`
-3. 如果配置了 `SUPABASE_FUNCTIONS_JWT`，调用 `admin-geocoding` 执行外部地理编码
+1. 从 `ingestion_listings.raw_detail_html` 解析详情页 HTML
+2. 清理并结构化字段，写入 `listing_indexes`
+3. 扫描索引中的邮编并加入 `geocoding_cache`
 4. 同步坐标、学校距离和通勤估算回索引表
 
 手动触发示例：
@@ -67,7 +66,6 @@ cp .env.example .env.local
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SECRET_KEY=
-SUPABASE_FUNCTIONS_JWT=
 CRON_SECRET=
 DATABASE_URL=
 CRAWL_DAYS=3
@@ -75,9 +73,6 @@ MAX_PAGES_PER_RUN=5
 MAX_INSERTED_PER_RUN=50
 MAX_DETAILS_PER_RUN=200
 DETAIL_CONCURRENCY=2
-POST_CRAWL_PIPELINE_ENABLED=true
-POST_CRAWL_INDEX_LIMIT=200
-POST_CRAWL_GEOCODING_LIMIT=50
 ```
 
 3. 执行数据库迁移

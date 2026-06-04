@@ -85,7 +85,6 @@ export type CrawlSummary = {
   pagesFetched: number;
   detailsFetched: number;
   stoppedReason?: string;
-  postprocess?: Record<string, unknown>;
 };
 
 export interface IngestionListingRow {
