@@ -26,38 +26,42 @@ type NormalizedListingSource = {
   detailUrl: string;
   rawDetailText: string;
   bodyText: string;
+  cleanText: string;
   postedText: string | null;
   postedAt: string | null;
   contactText: string | null;
   whatsappUrl: string | null;
-  ceaRegNo: string | null;
   mrtArea: string | null;
   price: number | null;
   phone: string | null;
   wechat: string | null;
   tags: string[];
+  parsedFromHtml: boolean;
 };
 
-type ListingCleanRow = {
+type ListingCleanInsertRow = {
+  ingestion_listing_id: string;
   source: string;
   source_id: string;
+  title: string;
   listing_url: string | null;
   detail_url: string | null;
-  title: string;
   category: string | null;
-  posted_text: string | null;
-  posted_at: string | null;
   price: number | null;
-  mrt_area: string | null;
-  contact_text: string | null;
   phone: string | null;
   wechat: string | null;
   whatsapp_url: string | null;
-  cea_reg_no: string | null;
+  contact_text: string | null;
+  posted_text: string | null;
+  posted_at: string | null;
+  scraped_at: string | null;
+  mrt_area: string | null;
   tags: string[];
-  raw_detail_text: string | null;
   body_text: string | null;
-  summary: string | null;
+  clean_text: string | null;
+  raw_detail_text: string | null;
+  raw_html_available: boolean;
+  parsed_from_html: boolean;
   room_type: string | null;
   normalized_room_type: string;
   available_from: string | null;
@@ -74,14 +78,19 @@ type ListingCleanRow = {
   image_urls: string[];
   fingerprint: string;
   raw_snapshot: Record<string, unknown>;
+  clean_version: string;
   status: ListingIndexRow["status"];
-  cleaned_at: string;
+};
+
+type ListingCleanRow = ListingCleanInsertRow & {
+  id: string;
 };
 
 const INGESTION_TABLE = config.listingTableName;
 const CLEAN_TABLE = process.env.LISTING_CLEAN_TABLE_NAME ?? "listing_clean";
 const INDEX_TABLE = process.env.LISTING_INDEX_TABLE_NAME ?? "listing_indexes";
 const DEFAULT_LIMIT = 100;
+const CLEAN_VERSION = "2026-06-04-clean-v1";
 
 export async function processNewListings(limit = DEFAULT_LIMIT): Promise<ProcessNewListingsSummary> {
   return processNewListingsWithOptions({ limit });
@@ -106,13 +115,13 @@ export async function processNewListingsWithOptions(options: ProcessNewListingsO
 
   for (const row of rows) {
     try {
-      const cleanRow = cleanListing(row);
-      if (!cleanRow) {
+      const cleanRowInput = cleanListing(row);
+      if (!cleanRowInput) {
         summary.errors += 1;
         continue;
       }
 
-      await upsertListingClean(cleanRow);
+      const cleanRow = await upsertListingClean(cleanRowInput);
       summary.cleaned += 1;
 
       const indexRow = buildIndex(cleanRow);
@@ -204,11 +213,11 @@ async function hasListingClean(source: string, sourceId: string): Promise<boolea
     source_id: `eq.${sourceId}`,
     limit: "1"
   });
-  const rows = await supabaseRequest<Array<{ id: string | number }>>(`${CLEAN_TABLE}?${params.toString()}`);
+  const rows = await supabaseRequest<Array<{ id: string }>>(`${CLEAN_TABLE}?${params.toString()}`);
   return rows.length > 0;
 }
 
-export function cleanListing(row: IngestionListingRow): ListingCleanRow | null {
+export function cleanListing(row: IngestionListingRow): ListingCleanInsertRow | null {
   const source = normalizeListingSource(row);
 
   if (!row.source || !row.source_id || !source.title || !source.detailUrl) {
@@ -232,25 +241,28 @@ export function cleanListing(row: IngestionListingRow): ListingCleanRow | null {
   const status: ListingIndexRow["status"] = row.removed_from_source ? "removed" : source.bodyText ? "active" : "invalid";
 
   return {
+    ingestion_listing_id: String(row.id),
     source: row.source,
     source_id: row.source_id,
+    title: source.title,
     listing_url: source.listingUrl,
     detail_url: source.detailUrl,
-    title: source.title,
     category: source.category,
-    posted_text: source.postedText,
-    posted_at: source.postedAt,
     price: source.price,
-    mrt_area: source.mrtArea,
-    contact_text: source.contactText,
     phone: source.phone,
     wechat: source.wechat,
     whatsapp_url: source.whatsappUrl,
-    cea_reg_no: source.ceaRegNo,
+    contact_text: source.contactText,
+    posted_text: source.postedText,
+    posted_at: source.postedAt,
+    scraped_at: row.scraped_at,
+    mrt_area: source.mrtArea,
     tags: source.tags,
-    raw_detail_text: source.rawDetailText || null,
     body_text: source.bodyText || null,
-    summary: buildSummary(source.bodyText),
+    clean_text: source.cleanText || null,
+    raw_detail_text: source.rawDetailText || null,
+    raw_html_available: Boolean(row.raw_detail_html),
+    parsed_from_html: source.parsedFromHtml,
     room_type: semantic.roomType,
     normalized_room_type: semantic.normalizedRoomType,
     available_from: semantic.availableFrom?.toISOString() ?? null,
@@ -267,8 +279,8 @@ export function cleanListing(row: IngestionListingRow): ListingCleanRow | null {
     image_urls: semantic.imageUrls,
     fingerprint: semantic.fingerprint,
     raw_snapshot: semantic.rawSnapshot,
-    status,
-    cleaned_at: new Date().toISOString()
+    clean_version: CLEAN_VERSION,
+    status
   };
 }
 
@@ -279,7 +291,7 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
     mrtArea: cleanRow.mrt_area,
     price: cleanRow.price,
     tags: cleanRow.tags,
-    bodyText: cleanRow.body_text ?? "",
+    bodyText: cleanRow.clean_text ?? cleanRow.body_text ?? "",
     roomType: cleanRow.room_type,
     normalizedRoomType: cleanRow.normalized_room_type,
     amenities: cleanRow.amenities,
@@ -290,8 +302,9 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
   return {
     source: cleanRow.source,
     source_id: cleanRow.source_id,
+    clean_listing_id: cleanRow.id,
     title: cleanRow.title,
-    summary: cleanRow.summary,
+    summary: buildSummary(cleanRow.clean_text ?? cleanRow.body_text ?? ""),
     price: cleanRow.price,
     mrt_area: cleanRow.mrt_area,
     tags: cleanRow.tags,
@@ -326,6 +339,14 @@ function normalizeListingSource(row: IngestionListingRow): NormalizedListingSour
       const title = cleanText(parsed.title ?? row.list_title ?? "");
       const rawDetailText = cleanMultilineText(parsed.rawDetailText || row.list_raw_text || "");
       const bodyText = cleanMultilineText(parsed.bodyText ?? rawDetailText);
+      const semanticCleanText = cleanMultilineText([
+        title,
+        parsed.category,
+        parsed.mrtArea,
+        parsed.price ? `$${parsed.price}` : null,
+        parsed.tags.join(" "),
+        bodyText
+      ].filter(Boolean).join("\n"));
 
       return {
         title,
@@ -334,16 +355,17 @@ function normalizeListingSource(row: IngestionListingRow): NormalizedListingSour
         detailUrl,
         rawDetailText,
         bodyText,
+        cleanText: semanticCleanText,
         postedText: parsed.postedText ?? row.list_posted_text,
         postedAt: parsed.postedAt?.toISOString() ?? null,
         contactText: parsed.contactText ?? row.list_contact,
         whatsappUrl: parsed.whatsappUrl,
-        ceaRegNo: parsed.ceaRegNo,
         mrtArea: parsed.mrtArea,
         price: parsed.price ?? row.list_price,
         phone: parsed.phone,
         wechat: parsed.wechat,
-        tags: parsed.tags
+        tags: parsed.tags,
+        parsedFromHtml: true
       };
     } catch (error) {
       logger.error("raw html reparse failed, falling back to stored text", {
@@ -354,35 +376,50 @@ function normalizeListingSource(row: IngestionListingRow): NormalizedListingSour
   }
 
   const rawDetailText = cleanMultilineText(row.list_raw_text ?? "");
+  const title = cleanText(row.list_title ?? "");
+  const semanticCleanText = cleanMultilineText([
+    title,
+    row.list_price ? `$${row.list_price}` : null,
+    row.list_contact,
+    rawDetailText
+  ].filter(Boolean).join("\n"));
+
   return {
-    title: cleanText(row.list_title ?? ""),
+    title,
     category: null,
     listingUrl: row.listing_url,
     detailUrl,
     rawDetailText,
     bodyText: rawDetailText,
+    cleanText: semanticCleanText,
     postedText: row.list_posted_text,
     postedAt: null,
     contactText: row.list_contact,
     whatsappUrl: null,
-    ceaRegNo: null,
     mrtArea: null,
     price: row.list_price,
     phone: null,
     wechat: null,
-    tags: []
+    tags: [],
+    parsedFromHtml: false
   };
 }
 
-async function upsertListingClean(row: ListingCleanRow): Promise<void> {
-  await supabaseRequest(`${CLEAN_TABLE}?on_conflict=source,source_id`, {
+async function upsertListingClean(row: ListingCleanInsertRow): Promise<ListingCleanRow> {
+  const result = await supabaseRequest<ListingCleanRow[]>(`${CLEAN_TABLE}?on_conflict=source,source_id`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal"
+      Prefer: "resolution=merge-duplicates,return=representation"
     },
     body: JSON.stringify(row)
   });
+
+  const cleanRow = result[0];
+  if (!cleanRow?.id) {
+    throw new Error("listing_clean upsert did not return an id");
+  }
+  return cleanRow;
 }
 
 async function upsertListingIndex(row: ListingIndexRow): Promise<void> {
@@ -430,7 +467,7 @@ export function buildSearchText(input: {
 }
 
 function isNearNtu(row: ListingCleanRow): boolean {
-  const text = `${row.title}\n${row.mrt_area ?? ""}\n${row.body_text ?? ""}\n${row.address_text ?? ""}`;
+  const text = `${row.title}\n${row.mrt_area ?? ""}\n${row.clean_text ?? row.body_text ?? ""}\n${row.address_text ?? ""}`;
   return /ntu|南洋理工|jurong|boon lay|pioneer|文礼|先驱|裕廊/i.test(text);
 }
 
@@ -446,7 +483,7 @@ function scoreNtuFit(row: ListingCleanRow): number {
 }
 
 function isStudentFriendly(row: ListingCleanRow): boolean {
-  return scoreNtuFit(row) >= 50 || /学生|student/i.test(`${row.title}\n${row.body_text ?? ""}`);
+  return scoreNtuFit(row) >= 50 || /学生|student/i.test(`${row.title}\n${row.clean_text ?? row.body_text ?? ""}`);
 }
 
 function buildMatchReasons(row: ListingCleanRow): string[] {
