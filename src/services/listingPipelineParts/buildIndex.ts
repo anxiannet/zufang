@@ -42,6 +42,7 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
     price: cleanRow.price,
     mrt_area: cleanRow.mrt_area,
     tags: cleanRow.tags,
+    body_text: cleanRow.clean_text,
     search_text: searchText,
     room_type: cleanRow.room_type,
     normalized_room_type: cleanRow.normalized_room_type,

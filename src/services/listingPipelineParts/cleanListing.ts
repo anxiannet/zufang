@@ -13,6 +13,7 @@ type NormalizedListingSource = {
   rawDetailText: string;
   bodyText: string;
   cleanText: string;
+  category: string | null;
   postedAt: string | null;
   mrtArea: string | null;
   price: number | null;
@@ -31,6 +32,7 @@ export function cleanListing(row: IngestionListingRow): ListingCleanInsertRow | 
 
   const semantic = parseSemanticRentalFields({
     title: source.title,
+    category: source.category,
     mrtArea: source.mrtArea,
     price: source.price,
     phone: source.phone,
@@ -116,6 +118,7 @@ function normalizeListingSource(row: IngestionListingRow): NormalizedListingSour
         rawDetailText,
         bodyText,
         cleanText: semanticCleanText,
+        category: parsed.category,
         postedAt: parsed.postedAt?.toISOString() ?? null,
         mrtArea: parsed.mrtArea,
         price: parsed.price ?? row.list_price,
@@ -147,6 +150,7 @@ function normalizeListingSource(row: IngestionListingRow): NormalizedListingSour
     rawDetailText,
     bodyText: rawDetailText,
     cleanText: semanticCleanText,
+    category: null,
     postedAt: null,
     mrtArea: null,
     price: row.list_price,
