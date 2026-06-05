@@ -8,11 +8,8 @@ export function buildSemanticTags(
 
   if (row.normalized_room_type === "master_room") tags.add("MASTER_ROOM");
   if (row.normalized_room_type === "common_room") tags.add("COMMON_ROOM");
-  if (row.normalized_room_type === "small_common_room") tags.add("SMALL_COMMON_ROOM");
-  if (row.normalized_room_type === "partition_room") tags.add("PARTITION_ROOM");
-  if (row.normalized_room_type === "bed_space") tags.add("BEDSPACE");
+  if (row.normalized_room_type === "single_room" || row.normalized_room_type === "partition_room") tags.add("SINGLE_ROOM");
   if (row.normalized_room_type === "studio") tags.add("STUDIO");
-  if (row.normalized_room_type === "whole_unit") tags.add("WHOLE_UNIT");
 
   if (row.cooking_allowed === true) tags.add("COOKING_ALLOWED");
   if (row.cooking_allowed === false) tags.add("NO_COOKING");

@@ -82,9 +82,9 @@ function scoreDebugResult(row: IndexListingRow & { search_text?: string | null }
     reasons.push("ROOM_MASTER");
   }
 
-  if (/单人间|隔间|partition/i.test(query) && row.normalized_room_type === "partition_room") {
+  if (/单人间|隔间|partition/i.test(query) && (row.normalized_room_type === "single_room" || row.normalized_room_type === "partition_room")) {
     score += 30;
-    reasons.push("ROOM_PARTITION");
+    reasons.push("ROOM_SINGLE");
   }
 
   if (/可煮|煮饭|cooking/i.test(query) && row.cooking_allowed === true) {
@@ -125,7 +125,7 @@ function expandQueryTerms(query: string): string[] {
     ["主人房", "主卧", "MASTER_ROOM", "master_room", "master room"].forEach((term) => terms.add(term));
   }
   if (/单人间|隔间|partition/i.test(query)) {
-    ["单人间", "隔间", "PARTITION_ROOM", "partition_room", "partition"].forEach((term) => terms.add(term));
+    ["单人间", "隔间", "储物间", "佣人房", "SINGLE_ROOM", "single_room", "PARTITION_ROOM", "partition_room", "partition"].forEach((term) => terms.add(term));
   }
   if (/可煮|煮饭|cooking/i.test(query)) {
     ["可煮", "可以煮", "COOKING_ALLOWED", "cooking_allowed", "cooking"].forEach((term) => terms.add(term));

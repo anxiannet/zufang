@@ -23,15 +23,26 @@ export type CleanListingRow = {
   created_at: string | null;
 };
 
-export async function getCleanListings(): Promise<CleanListingRow[]> {
+export type CleanListingsFilter = {
+  room_type?: "missing";
+};
+
+export async function getCleanListings(filter: CleanListingsFilter = {}): Promise<CleanListingRow[]> {
   await requireRole(["admin"]);
   const supabase = createAdminClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("listing_clean")
     .select("id,source,source_id,title,price,mrt_area,room_type,normalized_room_type,cooking_allowed,can_register_address,landlord_stay,gender_preference,status,detail_url,listing_url,clean_version,created_at")
-    .order("created_at", { ascending: false })
-    .limit(200);
+    .order("created_at", { ascending: false });
+
+  if (filter.room_type === "missing") {
+    query = query.or("room_type.is.null,room_type.eq.,normalized_room_type.is.null,normalized_room_type.eq.");
+  } else {
+    query = query.limit(200);
+  }
+
+  const { data, error } = await query;
 
   if (error) throw new Error(error.message);
   return (data ?? []) as CleanListingRow[];

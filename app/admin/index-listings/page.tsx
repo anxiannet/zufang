@@ -164,8 +164,8 @@ function countRoomType(listings: IndexListingRow[], roomType: string) {
 function formatRoomType(value: string | null) {
   if (value === "master_room") return "主人房";
   if (value === "common_room") return "普通房";
-  if (value === "partition_room") return "单人间/隔间";
-  if (value === "whole_unit") return "整套";
+  if (value === "single_room" || value === "partition_room") return "单人间";
+  if (value === "studio") return "Studio公寓";
   return value ?? "unknown";
 }
 

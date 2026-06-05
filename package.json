@@ -13,7 +13,7 @@
     "index:listings": "tsx src/indexer/index.ts",
     "enrich:commute": "tsx scripts/enrichCommute.ts",
     "enrich:ai": "tsx scripts/enrichAiAnalysis.ts",
-    "test:ingestion": "tsx src/tests/zufangDetailParser.test.ts && tsx src/tests/listingExclusion.test.ts"
+    "test:ingestion": "tsx src/tests/zufangDetailParser.test.ts && tsx src/tests/listingExclusion.test.ts && tsx src/tests/semanticRentalParser.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",

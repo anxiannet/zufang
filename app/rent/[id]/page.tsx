@@ -9,8 +9,9 @@ import { facilityLabels } from "@/lib/types";
 const roomLabels: Record<string, string> = {
   common_room: "普通房",
   master_room: "主人房",
-  studio: "Studio",
-  whole_unit: "整套"
+  single_room: "单人间",
+  partition_room: "单人间",
+  studio: "Studio公寓"
 };
 
 export default async function ListingDetailPage({

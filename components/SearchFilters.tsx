@@ -31,8 +31,8 @@ export function SearchFilters({ searchParams }: { searchParams: Record<string, s
           <option value="">全部房型</option>
           <option value="common_room">普通房</option>
           <option value="master_room">主人房</option>
-          <option value="studio">Studio</option>
-          <option value="whole_unit">整套</option>
+          <option value="single_room">单人间</option>
+          <option value="studio">Studio公寓</option>
         </select>
         <input type="date" name="available_from" defaultValue={value("available_from")} />
         <input name="min_lease_months" defaultValue={value("min_lease_months")} placeholder="最长接受租期" />
