@@ -158,11 +158,12 @@ function Metric({ label, value }: { label: string; value: number }) {
 }
 
 function TagList({ tags, color = "gray" }: { tags: string[]; color?: "gray" | "blue" }) {
-  if (!tags.length) return <span className="text-xs text-muted">无</span>;
+  const unique_tags = Array.from(new Set(tags));
+  if (!unique_tags.length) return <span className="text-xs text-muted">无</span>;
   const className = color === "blue" ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-700";
   return (
     <div className="flex flex-wrap gap-1.5">
-      {tags.map((tag) => (
+      {unique_tags.map((tag) => (
         <span key={tag} className={`rounded px-2 py-1 text-xs font-semibold ${className}`}>
           {tag}
         </span>

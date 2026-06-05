@@ -130,10 +130,11 @@ function Metric({ label, value }: { label: string; value: number }) {
 }
 
 function TagList({ tags }: { tags: string[] }) {
-  if (!tags.length) return <span className="text-xs text-muted">无</span>;
+  const unique_tags = Array.from(new Set(tags));
+  if (!unique_tags.length) return <span className="text-xs text-muted">无</span>;
   return (
     <div className="flex flex-wrap gap-1.5">
-      {tags.map((tag) => (
+      {unique_tags.map((tag) => (
         <span key={tag} className="rounded bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700">
           {tag}
         </span>

@@ -5,7 +5,9 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { enqueueMissingCommuteJobs } from "@/src/services/commuteEnrichmentQueue";
 import { processNewListings } from "@/src/services/listingPipeline";
+import { runCommuteEnrichment, SchoolCode } from "@/scripts/enrichCommute";
 
 export async function publishListing(listingId: string) {
   await requireRole(["admin"]);
@@ -312,4 +314,148 @@ export async function runAdminGeocodingTask(formData: FormData) {
   const rateLimited = data?.rate_limited ? "&rate_limited=1" : "";
 
   redirect(`/admin/geocoding?success=1&task=${encodeURIComponent(action)}${processed}${synced}${refreshed}${enqueued}${rateLimited}`);
+}
+
+export async function getCommuteDebugDashboard() {
+  await requireRole(["admin"]);
+  const supabase = await createClient();
+
+  const statuses = ["pending", "retry", "completed", "failed"];
+  const [
+    totalActive,
+    withCoords,
+    withNtu,
+    withAllSchools,
+    jobCounts,
+    recentJobs,
+    failedJobs,
+    completedListings
+  ] = await Promise.all([
+    supabase.from("listing_indexes").select("id", { count: "exact", head: true }).eq("status", "active"),
+    supabase.from("listing_indexes").select("id", { count: "exact", head: true }).eq("status", "active").not("latitude", "is", null).not("longitude", "is", null),
+    supabase.from("listing_indexes").select("id", { count: "exact", head: true }).eq("status", "active").not("travel_time_bus_ntu", "is", null),
+    supabase
+      .from("listing_indexes")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "active")
+      .not("travel_time_bus_ntu", "is", null)
+      .not("travel_time_bus_nus", "is", null)
+      .not("travel_time_bus_smu", "is", null)
+      .not("travel_time_bus_sutd", "is", null),
+    Promise.all(statuses.map((status) => supabase.from("commute_enrichment_jobs").select("id", { count: "exact", head: true }).eq("status", status))),
+    supabase
+      .from("commute_enrichment_queue")
+      .select("id,listing_index_id,title,source,source_id,postal_code,address_text,status,retry_count,last_error,updated_at")
+      .order("updated_at", { ascending: false })
+      .limit(30),
+    supabase
+      .from("commute_enrichment_queue")
+      .select("id,listing_index_id,title,postal_code,address_text,status,retry_count,last_error,updated_at")
+      .in("status", ["failed", "retry"])
+      .order("updated_at", { ascending: false })
+      .limit(30),
+    supabase
+      .from("listing_indexes")
+      .select("id,title,price,postal_code,address_text,travel_time_bus_ntu,travel_time_bus_nus,travel_time_bus_smu,travel_time_bus_sutd,commute_computed_at,commute_source")
+      .not("travel_time_bus_ntu", "is", null)
+      .order("commute_computed_at", { ascending: false })
+      .limit(20)
+  ]);
+
+  for (const result of [totalActive, withCoords, withNtu, withAllSchools, recentJobs, failedJobs, completedListings]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  for (const result of jobCounts) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  return {
+    stats: {
+      total_active: totalActive.count ?? 0,
+      with_coordinates: withCoords.count ?? 0,
+      with_ntu_commute: withNtu.count ?? 0,
+      with_all_school_commute: withAllSchools.count ?? 0
+    },
+    jobStatus: Object.fromEntries(statuses.map((status, index) => [status, jobCounts[index].count ?? 0])),
+    recentJobs: recentJobs.data ?? [],
+    failedJobs: failedJobs.data ?? [],
+    completedListings: completedListings.data ?? [],
+    hasOneMapToken: Boolean(process.env.ONEMAP_API_TOKEN || process.env.ONEMAP_TOKEN)
+  };
+}
+
+export async function runAdminCommuteTask(formData: FormData) {
+  await requireRole(["admin"]);
+
+  const action = String(formData.get("action") ?? "");
+  const limit = clampAdminLimit(formData.get("limit"), 20);
+  const school = parseAdminSchool(formData.get("school"));
+
+  try {
+    if (action === "enqueue_missing") {
+      const summary = await enqueueMissingCommuteJobs(limit);
+      revalidatePath("/admin/commute");
+      redirect(
+        `/admin/commute?success=1&task=${encodeURIComponent(action)}&scanned=${summary.scanned}&enqueued=${summary.enqueued}&skipped=${summary.skipped}&errors=${summary.errors}`
+      );
+    }
+
+    if (action === "retry_failed") {
+      const adminSupabase = createAdminClient();
+      const { data, error } = await adminSupabase
+        .from("commute_enrichment_jobs")
+        .update({
+          status: "pending",
+          retry_count: 0,
+          last_error: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq("status", "failed")
+        .select("id");
+
+      if (error) throw new Error(error.message);
+      revalidatePath("/admin/commute");
+      redirect(`/admin/commute?success=1&task=${encodeURIComponent(action)}&enqueued=${data?.length ?? 0}`);
+    }
+
+    if (action === "run" || action === "dry_run") {
+      if (!process.env.ONEMAP_API_TOKEN && !process.env.ONEMAP_TOKEN) {
+        throw new Error("ONEMAP_API_TOKEN is required on the server to run commute enrichment.");
+      }
+
+      const summary = await runCommuteEnrichment({
+        limit,
+        dryRun: action === "dry_run",
+        school
+      });
+      revalidatePath("/admin/commute");
+      redirect(
+        `/admin/commute?success=1&task=${encodeURIComponent(action)}&pending=${summary.pending_count}&selected=${summary.selected_count}&processed=${summary.success_count}&failed=${summary.failed_count}&skipped=${summary.skipped_count}`
+      );
+    }
+
+    throw new Error(`Unsupported commute action: ${action}`);
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    redirect(`/admin/commute?error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}&task=${encodeURIComponent(action)}`);
+  }
+}
+
+function isNextRedirectError(error: unknown): boolean {
+  const digest = (error as { digest?: unknown })?.digest;
+  return typeof digest === "string" && digest.startsWith("NEXT_REDIRECT");
+}
+
+function clampAdminLimit(value: FormDataEntryValue | null, fallback: number): number {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, 100);
+}
+
+function parseAdminSchool(value: FormDataEntryValue | null): SchoolCode | undefined {
+  const school = String(value ?? "").trim().toUpperCase();
+  if (!school) return undefined;
+  if (school === "NTU" || school === "NUS" || school === "SMU" || school === "SUTD") return school;
+  return undefined;
 }

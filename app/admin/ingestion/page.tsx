@@ -3,6 +3,7 @@ import { deleteIngestionListing, getIngestionListings, processNewIngestionListin
 import { getListingPipelineStats, rebuildListingPipeline } from "@/actions/rebuildListingPipeline";
 import { FormSubmitButton } from "@/components/admin/FormSubmitButton";
 import { getCurrentProfile } from "@/lib/auth";
+import { formatSingaporeShortDateTime } from "@/lib/dateTime";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -210,7 +211,7 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
                     <div className="mt-1">列表：{listing.list_raw_html ? "已保存" : "缺失"}</div>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    <div>抓取：{formatDate(listing.scraped_at)}</div>
+                    <div>抓取：{formatSingaporeShortDateTime(listing.scraped_at)}</div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-2">
@@ -289,9 +290,4 @@ function getRebuildResult(params: Record<string, string | string[] | undefined>)
     invalid: numberField(params.invalid),
     errors: numberField(params.errors)
   };
-}
-
-function formatDate(value: string | null) {
-  if (!value) return "-";
-  return new Date(value).toLocaleDateString("zh-SG", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }

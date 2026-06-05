@@ -1,10 +1,16 @@
 import Link from "next/link";
 import { getInvalidListings, InvalidListingRow } from "@/actions/invalidListings";
+import { DeleteInvalidListingForm } from "./DeleteInvalidListingForm";
 import { getCurrentProfile } from "@/lib/auth";
 
 type InvalidReason = string;
 
-export default async function InvalidListingsAdminPage() {
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function InvalidListingsAdminPage({ searchParams }: PageProps) {
+  const params = (await searchParams) ?? {};
   const profile = await getCurrentProfile();
 
   if (!profile) {
@@ -27,6 +33,17 @@ export default async function InvalidListingsAdminPage() {
 
   return (
     <Shell>
+      {params.deleted ? (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          已删除该无效房源的采集、清洗和索引数据。
+        </div>
+      ) : null}
+      {params.delete_error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          删除失败，请刷新后重试。
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="text-sm font-medium text-muted">
@@ -91,13 +108,16 @@ export default async function InvalidListingsAdminPage() {
                     <div className="mt-1 text-xs">{listing.source_id ?? "-"}</div>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {(listing.detail_url || listing.listing_url) ? (
-                      <a className="btn-secondary px-3 py-1.5" href={listing.detail_url || listing.listing_url || "#"} target="_blank" rel="noreferrer">
-                        原帖
-                      </a>
-                    ) : (
-                      <span className="text-xs text-muted">无链接</span>
-                    )}
+                    <div className="flex justify-end gap-2">
+                      {(listing.detail_url || listing.listing_url) ? (
+                        <a className="btn-secondary px-3 py-1.5" href={listing.detail_url || listing.listing_url || "#"} target="_blank" rel="noreferrer">
+                          原帖
+                        </a>
+                      ) : (
+                        <span className="self-center text-xs text-muted">无链接</span>
+                      )}
+                      <DeleteInvalidListingForm cleanListingId={listing.id} title={listing.title || listing.source_id || listing.id} />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -148,9 +168,20 @@ function ReasonBadges({ reasons }: { reasons: InvalidReason[] }) {
 }
 
 function getInvalidReasons(listing: InvalidListingRow): InvalidReason[] {
-  const value = listing.raw_snapshot?.invalid_reasons;
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => String(item)).filter(Boolean);
+  const text = [
+    listing.title,
+    listing.mrt_area,
+    listing.room_type,
+    listing.normalized_room_type,
+    listing.tags?.join(" "),
+    listing.clean_text,
+    listing.raw_detail_text
+  ].filter(Boolean).join("\n");
+
+  const reasons: InvalidReason[] = [];
+  if (/床位|搭房|搭铺|床铺|床位出租|bed\s*space|bedspace/i.test(text)) reasons.push("bedspace_or_shared_bed");
+  if (/日租|按天租|短租几天|小时房|daily\s*(rental|stay)|hourly/i.test(text)) reasons.push("daily_or_hourly_rental");
+  return reasons;
 }
 
 function countByReason(listings: InvalidListingRow[], reason: string) {

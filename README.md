@@ -114,14 +114,101 @@ npm run dev
 - `admin`：可审核和管理所有数据
 - 未登录用户：可浏览 `published` 房源，不能创建 enquiry
 
-## 地理信息
+## 地理信息与 AI 补齐
 
-当前实现：
+后台脚本采用保守的 upsert/update 策略，不会 truncate 房源表，不会删除 `listing_indexes`，也不会把已有通勤或 AI 标签覆盖为空。现有重建入口同样改为按 `source,source_id` upsert。
 
-- `services/geocoding.ts`：根据邮编前缀 mock 地址、经纬度、最近 MRT
-- `services/nearbyPlaces.ts`：根据经纬度 mock MRT、bus stop、food court、supermarket、mall
+### 环境变量
 
-后续接 OneMap API 时，只需要替换这两个服务的内部实现，数据库字段已经预留。
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+SUPABASE_SECRET_KEY=
+ONEMAP_API_TOKEN=
+ONEMAP_ROUTE_TIME=08:30:00
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5-mini
+```
+
+- `ONEMAP_API_TOKEN`：OneMap Search 和 Routing API 的 Authorization token。OneMap Search 现在也要求 token。
+- `ONEMAP_ROUTE_TIME`：公共交通路线计算时间，默认 `08:30:00`。
+- `OPENAI_API_KEY`：可选；没有配置时 AI 分析使用规则 fallback。
+
+### 真实通勤时间补齐
+
+从 `commute_enrichment_queue` 读取 `pending/retry`，优先用 `postal_code`，其次用 `address_text` 调 OneMap Search 写回坐标，再按 `school_locations` 里的 NTU/NUS/SMU/SUTD 坐标调用 OneMap Route。成功后更新 `listing_indexes.travel_time_bus_*`、`commute_computed_at`、`commute_source`，并将 `commute_enrichment_jobs.status` 置为 `completed`。失败时只更新 job 的 `retry/failed`、`retry_count` 和 `last_error`，不会清空已有通勤字段。
+
+通勤时间是缓存字段，不会每次搜索实时调用 OneMap：
+
+- 坐标缓存：`listing_indexes.latitude`、`listing_indexes.longitude`、`geocoded_at`、`geocode_source`
+- 通勤缓存：`listing_indexes.travel_time_bus_ntu/nus/smu/sutd`、`commute_computed_at`、`commute_source`
+- 队列状态：`commute_enrichment_jobs`
+
+新增或更新 `listing_indexes` 后会自动进入通勤队列：
+
+- 应用层：索引 upsert 后会调用 `enqueueCommuteJobForListingIndex`
+- 数据库层：`202606050002_auto_enqueue_commute_jobs.sql` 增加 trigger，防止其他写入路径漏入队
+- 地址或邮编变化时，已完成任务会重新置为 `pending`
+
+管理后台调试入口：
+
+```text
+/admin/commute
+```
+
+后台支持查看缓存覆盖率、队列状态、失败原因、最近通勤结果，并可执行扫描补漏、dry-run、小批量真实补齐、重试 failed。
+
+自动处理路径：
+
+- `app/api/cron/enrich-commute` 使用 `CRON_SECRET` 保护
+- `vercel.json` 已配置每天 UTC 20:30 触发，即新加坡时间 04:30
+- 默认每次处理 `COMMUTE_ENRICHMENT_LIMIT` 或 10 条 pending/retry 任务
+- 服务器必须配置 `ONEMAP_API_TOKEN`
+
+```bash
+npm run enrich:commute -- --limit 20
+npm run enrich:commute -- --limit 20 --school NTU
+npm run enrich:commute -- --limit 5 --dry-run
+```
+
+运行输出包含待处理数量、成功数量、失败数量和跳过数量。
+
+### AI 分析补齐
+
+从 `listing_indexes` 读取 title、summary、body_text、search_text、price、gender_preference、room_type、normalized_room_type、semantic_tags、tags，写入 `listing_ai_analysis`。默认只在记录不存在、`semantic_tags_ai` 为空或 `summary_ai` 为空时更新；需要覆盖时显式加 `--force`。
+
+```bash
+npm run enrich:ai -- --limit 20
+npm run enrich:ai -- --limit 20 --force
+npm run enrich:ai -- --limit 5 --dry-run
+```
+
+标准 AI 标签只允许：
+
+```text
+QUIET, STUDY_FRIENDLY, LOW_DENSITY, PRIVATE, FLEXIBLE_ACCESS,
+NIGHT_SHIFT_FRIENDLY, FEMALE_FRIENDLY, SOCIAL_FRIENDLY,
+INTROVERT_FRIENDLY, WORKING_PROFESSIONAL_FRIENDLY
+```
+
+没有 `OPENAI_API_KEY` 时会使用规则 fallback，例如“安静 / 不吵 / 清静”映射到 `QUIET` 和 `quiet_score=4`，“适合学习 / 学生”映射到 `STUDY_FRIENDLY`，女生偏好映射到 `FEMALE_FRIENDLY`。
+
+### 验证 SQL
+
+```sql
+select status, count(*) from commute_enrichment_jobs group by status;
+
+select count(*) filter (where latitude is not null and longitude is not null) as has_coords
+from listing_indexes;
+
+select count(*) filter (where travel_time_bus_ntu is not null) as has_ntu_commute
+from listing_indexes;
+
+select count(*) as total from listing_ai_analysis;
+
+select title, price, summary_ai, recommendation_reasons, risk_notes
+from listing_ai_search_view
+limit 10;
+```
 
 ## 图片上传
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCrawlJobs } from "@/actions/admin";
 import { getCurrentProfile } from "@/lib/auth";
+import { formatSingaporeShortDateTime } from "@/lib/dateTime";
 
 type CrawlJobRow = {
   id: number;
@@ -78,8 +79,8 @@ export default async function CrawlerAdminPage() {
                     <span className={statusClass(job.status)}>{job.status ?? "-"}</span>
                     <div className="mt-1 text-xs text-muted">{job.job_name ?? "-"}</div>
                   </td>
-                  <td className="px-4 py-3 text-muted">{formatDate(job.started_at)}</td>
-                  <td className="px-4 py-3 text-muted">{formatDate(job.finished_at)}</td>
+                  <td className="px-4 py-3 text-muted">{formatSingaporeShortDateTime(job.started_at)}</td>
+                  <td className="px-4 py-3 text-muted">{formatSingaporeShortDateTime(job.finished_at)}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.inserted ?? 0}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.targetInserted ?? 50}</td>
                   <td className="px-4 py-3 font-semibold text-ink">{job.summary?.updated ?? 0}</td>
@@ -119,14 +120,4 @@ function statusClass(status: string | null) {
   if (status === "failed") return `${base} bg-red-100 text-red-700`;
   if (status === "running") return `${base} bg-amber-100 text-amber-800`;
   return `${base} bg-gray-100 text-gray-700`;
-}
-
-function formatDate(value: string | null) {
-  if (!value) return "-";
-  return new Date(value).toLocaleString("zh-SG", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
 }

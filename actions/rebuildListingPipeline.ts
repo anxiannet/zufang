@@ -110,9 +110,6 @@ async function rebuildAllListingsFromIngestion(): Promise<RebuildSummary> {
     errors: 0
   };
 
-  await clearTable(supabase, "listing_indexes");
-  await clearTable(supabase, "listing_clean");
-
   let from = 0;
 
   while (true) {
@@ -137,19 +134,17 @@ async function rebuildAllListingsFromIngestion(): Promise<RebuildSummary> {
           continue;
         }
 
-        const { data: cleanRow, error: cleanError } = await supabase
+        const { data: cleanRows, error: cleanError } = await supabase
           .from("listing_clean")
-          .insert(cleanInput)
-          .select("*")
-          .single();
+          .upsert(cleanInput, { onConflict: "source,source_id" })
+          .select("*");
 
         if (cleanError) throw new Error(cleanError.message);
+        const cleanRow = cleanRows?.[0];
+        if (!cleanRow?.id) throw new Error("listing_clean upsert did not return an id");
         summary.cleaned += 1;
 
-        if (cleanRow.status !== "active") {
-          if (cleanRow.status === "invalid") summary.invalid += 1;
-          continue;
-        }
+        if (cleanRow.status === "invalid") summary.invalid += 1;
 
         const indexRow = buildIndex(cleanRow as any);
         const { error: indexError } = await supabase
@@ -173,9 +168,4 @@ async function rebuildAllListingsFromIngestion(): Promise<RebuildSummary> {
   }
 
   return summary;
-}
-
-async function clearTable(supabase: ReturnType<typeof createAdminClient>, tableName: string) {
-  const { error } = await supabase.from(tableName).delete().not("id", "is", null);
-  if (error) throw new Error(error.message);
 }

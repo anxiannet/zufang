@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { deleteIngestionListing, getIngestionListingDetail } from "@/actions/admin";
 import { getCurrentProfile } from "@/lib/auth";
+import { formatSingaporeMediumDateTime } from "@/lib/dateTime";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -89,8 +90,8 @@ export default async function IngestionListingDetailPage({ params }: PageProps) 
           <dl className="mt-3 space-y-3 text-sm">
             <Field label="列表联系" value={listing.list_contact} />
             <Field label="置顶" value={listing.is_top ? "是" : "否"} />
-            <Field label="抓取时间" value={formatDate(listing.scraped_at)} />
-            <Field label="入库时间" value={formatDate(listing.created_at)} />
+            <Field label="抓取时间" value={formatSingaporeMediumDateTime(listing.scraped_at)} />
+            <Field label="入库时间" value={formatSingaporeMediumDateTime(listing.created_at)} />
           </dl>
         </div>
 
@@ -145,9 +146,4 @@ function Field({ label, value }: { label: string; value: string | null | undefin
       <dd className="font-medium text-ink">{value || "-"}</dd>
     </div>
   );
-}
-
-function formatDate(value: string | null) {
-  if (!value) return "-";
-  return new Date(value).toLocaleString("zh-SG", { dateStyle: "medium", timeStyle: "short" });
 }

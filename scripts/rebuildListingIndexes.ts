@@ -2,15 +2,16 @@ import { buildIndex } from "../src/services/listingPipelineParts/buildIndex";
 import { CLEAN_TABLE, INDEX_TABLE } from "../src/services/listingPipelineParts/constants";
 import { ListingCleanRow } from "../src/services/listingPipelineParts/types";
 import { supabaseRequest } from "../src/db/pool";
+import { enqueueCommuteJobForListingIndex } from "../src/services/commuteEnrichmentQueue";
 
 const DEFAULT_BATCH_SIZE = 100;
 
 async function main() {
   const batchSize = normalizeBatchSize(process.env.REBUILD_INDEX_BATCH_SIZE);
-  const shouldClear = process.env.REBUILD_INDEX_CLEAR !== "false";
+  const shouldClear = process.env.REBUILD_INDEX_CLEAR === "true";
 
   if (shouldClear) {
-    await clearListingIndexes();
+    throw new Error("REBUILD_INDEX_CLEAR=true is disabled: listing_indexes must be rebuilt with upsert/update only.");
   }
 
   let offset = 0;
@@ -44,7 +45,7 @@ async function main() {
     offset += batchSize;
   }
 
-  console.log(JSON.stringify({ read, indexed, errors, cleared: shouldClear }, null, 2));
+  console.log(JSON.stringify({ read, indexed, errors, cleared: false }, null, 2));
 
   if (errors > 0) {
     process.exitCode = 1;
@@ -62,24 +63,20 @@ async function fetchListingCleanRows(limit: number, offset: number): Promise<Lis
   return supabaseRequest<ListingCleanRow[]>(`${CLEAN_TABLE}?${params.toString()}`);
 }
 
-async function clearListingIndexes(): Promise<void> {
-  await supabaseRequest(`${INDEX_TABLE}?id=not.is.null`, {
-    method: "DELETE",
-    headers: {
-      Prefer: "return=minimal"
-    }
-  });
-}
-
 async function upsertListingIndex(row: ReturnType<typeof buildIndex>): Promise<void> {
-  await supabaseRequest(`${INDEX_TABLE}?on_conflict=source,source_id`, {
+  const result = await supabaseRequest<Array<{ id: string; postal_code: string | null; address_text: string | null; status: string | null }>>(`${INDEX_TABLE}?on_conflict=source,source_id`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal"
+      Prefer: "resolution=merge-duplicates,return=representation"
     },
     body: JSON.stringify(row)
   });
+
+  const indexRow = result[0];
+  if (indexRow?.id) {
+    await enqueueCommuteJobForListingIndex(indexRow);
+  }
 }
 
 function normalizeBatchSize(value: string | undefined): number {

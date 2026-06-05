@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createListing } from "@/actions/listings";
+import { getSingaporeDateInputValue } from "@/lib/dateTime";
 import { facilities, facilityLabels } from "@/lib/types";
 
 const steps = ["核心信息", "居住质量", "规则限制", "设施", "图片"];
@@ -33,7 +34,7 @@ export function LandlordListingForm() {
           <Field name="rent_amount" label="租金 SGD/月" type="number" />
           <Field name="deposit_amount" label="押金 SGD" type="number" />
           <Field name="postal_code" label="邮编" placeholder="520123" />
-          <Field name="available_from" label="可入住日期" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
+          <Field name="available_from" label="可入住日期" type="date" defaultValue={getSingaporeDateInputValue()} />
           <Field name="min_lease_months" label="最短租期（月）" type="number" defaultValue="6" />
       </section>
 

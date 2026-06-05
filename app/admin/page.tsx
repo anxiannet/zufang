@@ -1,5 +1,6 @@
 import { appointAdmin, publishListing, rejectListing, unpublishListing, getAdminDashboard } from "@/actions/admin";
 import { getCurrentProfile } from "@/lib/auth";
+import { formatSingaporeDate } from "@/lib/dateTime";
 import Link from "next/link";
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -68,6 +69,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             <Link href="/admin/crawler" className="btn-secondary">采集任务</Link>
             <Link href="/admin/ingestion" className="btn-primary">管理采集数据</Link>
             <Link href="/admin/geocoding" className="btn-primary">地理编码中心</Link>
+            <Link href="/admin/commute" className="btn-primary">真实通勤调试</Link>
           </div>
         </div>
       </section>
@@ -88,11 +90,12 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-5">
+      <section className="grid gap-3 md:grid-cols-6">
         <AdminNavCard href="/admin/ingestion" title="采集层" description="查看 ingestion_listings 原始抓取数据，处理新房源，重建全部索引。" />
         <AdminNavCard href="/admin/clean-listings" title="清洗层" description="查看 listing_clean 的房型、三态字段、状态和结构化结果。" />
         <AdminNavCard href="/admin/invalid-listings" title="无效房源" description="审计床位、搭房、日租、小时房等被过滤记录。" />
         <AdminNavCard href="/admin/index-listings" title="索引层" description="查看 listing_indexes 的 summary、NTU 分、标签和匹配原因。" />
+        <AdminNavCard href="/admin/commute" title="真实通勤" description="查看 OneMap 通勤缓存、队列状态、失败原因并手动跑批。" />
         <AdminNavCard href="/admin/search-debug" title="搜索调试" description="输入自然语言搜索词，查看命中结果、得分和排序原因。" />
       </section>
 
@@ -137,7 +140,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <Panel title="咨询记录">
           {dashboard.enquiries.map((enquiry: any) => (
             <div key={enquiry.id} className="border-b border-line py-2 text-sm last:border-0">
-              <div className="font-semibold">{enquiry.status} · {new Date(enquiry.created_at).toLocaleDateString("zh-SG")}</div>
+              <div className="font-semibold">{enquiry.status} · {formatSingaporeDate(enquiry.created_at)}</div>
               <div className="line-clamp-2 text-muted">{enquiry.message}</div>
             </div>
           ))}

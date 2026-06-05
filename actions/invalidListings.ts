@@ -1,10 +1,9 @@
-"use server";
-
 import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type InvalidListingRow = {
   id: string;
+  ingestion_listing_id: string | null;
   source: string | null;
   source_id: string | null;
   title: string | null;
@@ -15,7 +14,9 @@ export type InvalidListingRow = {
   detail_url: string | null;
   listing_url: string | null;
   status: string | null;
-  raw_snapshot: Record<string, unknown> | null;
+  tags: string[] | null;
+  clean_text: string | null;
+  raw_detail_text: string | null;
   created_at: string | null;
 };
 
@@ -25,7 +26,7 @@ export async function getInvalidListings(): Promise<InvalidListingRow[]> {
 
   const { data, error } = await supabase
     .from("listing_clean")
-    .select("id,source,source_id,title,price,mrt_area,room_type,normalized_room_type,detail_url,listing_url,status,raw_snapshot,created_at")
+    .select("id,ingestion_listing_id,source,source_id,title,price,mrt_area,room_type,normalized_room_type,detail_url,listing_url,status,tags,clean_text,raw_detail_text,created_at")
     .eq("status", "invalid")
     .order("created_at", { ascending: false })
     .limit(200);

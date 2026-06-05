@@ -2,6 +2,7 @@ import { ListingIndexRow } from "../../models/listing";
 import { supabaseRequest } from "../../db/pool";
 import { CLEAN_TABLE, INDEX_TABLE } from "./constants";
 import { ListingCleanInsertRow, ListingCleanRow } from "./types";
+import { enqueueCommuteJobForListingIndex } from "../commuteEnrichmentQueue";
 
 export async function upsertListingClean(row: ListingCleanInsertRow): Promise<ListingCleanRow> {
   const result = await supabaseRequest<ListingCleanRow[]>(`${CLEAN_TABLE}?on_conflict=source,source_id`, {
@@ -21,12 +22,17 @@ export async function upsertListingClean(row: ListingCleanInsertRow): Promise<Li
 }
 
 export async function upsertListingIndex(row: ListingIndexRow): Promise<void> {
-  await supabaseRequest(`${INDEX_TABLE}?on_conflict=source,source_id`, {
+  const result = await supabaseRequest<Array<{ id: string; postal_code: string | null; address_text: string | null; status: string | null }>>(`${INDEX_TABLE}?on_conflict=source,source_id`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal"
+      Prefer: "resolution=merge-duplicates,return=representation"
     },
     body: JSON.stringify(row)
   });
+
+  const indexRow = result[0];
+  if (indexRow?.id) {
+    await enqueueCommuteJobForListingIndex(indexRow);
+  }
 }
