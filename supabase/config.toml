@@ -1,0 +1,4 @@
+project_id = "tspcriitzptjdcxqyary"
+
+[functions.enrich-geocode]
+verify_jwt = false
