@@ -8,22 +8,17 @@ import { ListingCleanInsertRow } from "./types";
 
 type NormalizedListingSource = {
   title: string;
-  category: string | null;
   listingUrl: string | null;
   detailUrl: string;
   rawDetailText: string;
   bodyText: string;
   cleanText: string;
-  postedText: string | null;
   postedAt: string | null;
-  contactText: string | null;
-  whatsappUrl: string | null;
   mrtArea: string | null;
   price: number | null;
   phone: string | null;
   wechat: string | null;
   tags: string[];
-  parsedFromHtml: boolean;
 };
 
 export function cleanListing(row: IngestionListingRow): ListingCleanInsertRow | null {
@@ -36,7 +31,6 @@ export function cleanListing(row: IngestionListingRow): ListingCleanInsertRow | 
 
   const semantic = parseSemanticRentalFields({
     title: source.title,
-    category: source.category,
     mrtArea: source.mrtArea,
     price: source.price,
     phone: source.phone,
@@ -68,22 +62,15 @@ export function cleanListing(row: IngestionListingRow): ListingCleanInsertRow | 
     title: source.title,
     listing_url: source.listingUrl,
     detail_url: source.detailUrl,
-    category: source.category,
     price: source.price,
     phone: source.phone,
     wechat: source.wechat,
-    whatsapp_url: source.whatsappUrl,
-    contact_text: source.contactText,
-    posted_text: source.postedText,
     posted_at: source.postedAt,
     scraped_at: row.scraped_at,
     mrt_area: source.mrtArea,
     tags: source.tags,
-    body_text: source.bodyText || null,
     clean_text: source.cleanText || null,
     raw_detail_text: source.rawDetailText || null,
-    raw_html_available: Boolean(row.raw_detail_html),
-    parsed_from_html: source.parsedFromHtml,
     room_type: semantic.roomType,
     normalized_room_type: semantic.normalizedRoomType,
     available_from: semantic.availableFrom?.toISOString() ?? null,
@@ -99,7 +86,6 @@ export function cleanListing(row: IngestionListingRow): ListingCleanInsertRow | 
     postal_code: semantic.postalCode,
     image_urls: semantic.imageUrls,
     fingerprint: semantic.fingerprint,
-    raw_snapshot: semantic.rawSnapshot,
     clean_version: CLEAN_VERSION,
     status
   };
@@ -117,7 +103,6 @@ function normalizeListingSource(row: IngestionListingRow): NormalizedListingSour
       const bodyText = cleanMultilineText(parsed.bodyText ?? rawDetailText);
       const semanticCleanText = cleanMultilineText([
         title,
-        parsed.category,
         parsed.mrtArea,
         parsed.price ? `$${parsed.price}` : null,
         parsed.tags.join(" "),
@@ -126,22 +111,17 @@ function normalizeListingSource(row: IngestionListingRow): NormalizedListingSour
 
       return {
         title,
-        category: parsed.category,
         listingUrl: row.listing_url,
         detailUrl,
         rawDetailText,
         bodyText,
         cleanText: semanticCleanText,
-        postedText: parsed.postedText,
         postedAt: parsed.postedAt?.toISOString() ?? null,
-        contactText: parsed.contactText ?? row.list_contact,
-        whatsappUrl: parsed.whatsappUrl,
         mrtArea: parsed.mrtArea,
         price: parsed.price ?? row.list_price,
         phone: parsed.phone,
         wechat: parsed.wechat,
-        tags: parsed.tags,
-        parsedFromHtml: true
+        tags: parsed.tags
       };
     } catch (error) {
       logger.error("raw html reparse failed, falling back to stored text", {
@@ -162,21 +142,16 @@ function normalizeListingSource(row: IngestionListingRow): NormalizedListingSour
 
   return {
     title,
-    category: null,
     listingUrl: row.listing_url,
     detailUrl,
     rawDetailText,
     bodyText: rawDetailText,
     cleanText: semanticCleanText,
-    postedText: null,
     postedAt: null,
-    contactText: row.list_contact,
-    whatsappUrl: null,
     mrtArea: null,
     price: row.list_price,
     phone: null,
     wechat: null,
-    tags: [],
-    parsedFromHtml: false
+    tags: []
   };
 }
