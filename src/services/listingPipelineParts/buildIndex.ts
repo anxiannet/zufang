@@ -15,11 +15,10 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
 
   const baseSearchText = buildSearchText({
     title: cleanRow.title,
-    category: cleanRow.category,
     mrtArea: cleanRow.mrt_area,
     price: cleanRow.price,
     tags: cleanRow.tags,
-    bodyText: cleanRow.clean_text ?? cleanRow.body_text ?? "",
+    cleanText: cleanRow.clean_text ?? "",
     roomType: cleanRow.room_type,
     normalizedRoomType: cleanRow.normalized_room_type,
     amenities: cleanRow.amenities,
@@ -39,11 +38,10 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
     source_id: cleanRow.source_id,
     clean_listing_id: cleanRow.id,
     title: cleanRow.title,
-    summary: buildSummary(cleanRow.clean_text ?? cleanRow.body_text ?? ""),
+    summary: buildSummary(cleanRow.clean_text ?? ""),
     price: cleanRow.price,
     mrt_area: cleanRow.mrt_area,
     tags: cleanRow.tags,
-    body_text: cleanRow.body_text,
     search_text: searchText,
     room_type: cleanRow.room_type,
     normalized_room_type: cleanRow.normalized_room_type,
@@ -66,18 +64,17 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
   };
 }
 
-export function buildSummary(bodyText: string): string | null {
-  const value = cleanText(bodyText).slice(0, 220);
+export function buildSummary(cleanTextValue: string): string | null {
+  const value = cleanText(cleanTextValue).slice(0, 220);
   return value || null;
 }
 
 export function buildSearchText(input: {
   title: string;
-  category: string | null;
   mrtArea: string | null;
   price: number | null;
   tags: string[];
-  bodyText: string;
+  cleanText: string;
   roomType: string | null;
   normalizedRoomType: string;
   amenities: string[];
@@ -86,7 +83,6 @@ export function buildSearchText(input: {
 }): string {
   return cleanMultilineText([
     input.title,
-    input.category,
     input.mrtArea,
     input.price ? `$${input.price}` : null,
     input.tags.join(" "),
@@ -95,7 +91,7 @@ export function buildSearchText(input: {
     input.amenities.join(" "),
     input.addressText,
     input.postalCode,
-    input.bodyText
+    input.cleanText
   ].filter(Boolean).join("\n"));
 }
 
