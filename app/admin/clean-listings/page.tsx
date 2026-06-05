@@ -2,8 +2,11 @@ import Link from "next/link";
 import { CleanListingRow, getCleanListings } from "@/actions/cleanListings";
 import { getCurrentProfile } from "@/lib/auth";
 
-export default async function CleanListingsAdminPage() {
+export default async function CleanListingsAdminPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const profile = await getCurrentProfile();
+  const params = await searchParams;
+  const room_type_filter = params.room_type === "missing" ? "missing" : undefined;
+  const is_missing_room_type_filter = room_type_filter === "missing";
 
   if (!profile) {
     return (
@@ -21,7 +24,7 @@ export default async function CleanListingsAdminPage() {
     );
   }
 
-  const listings = await getCleanListings();
+  const listings = await getCleanListings({ room_type: room_type_filter });
 
   return (
     <Shell>
@@ -38,23 +41,31 @@ export default async function CleanListingsAdminPage() {
           <p className="mt-2 text-sm text-muted">查看 listing_clean 的结构化结果，重点检查房型、三态字段和状态。</p>
         </div>
         <div className="flex gap-2">
+          <Link href="/admin/clean-listings" className={is_missing_room_type_filter ? "btn-secondary" : "btn-primary"}>全部房源</Link>
+          <Link href="/admin/clean-listings?room_type=missing" className={is_missing_room_type_filter ? "btn-primary" : "btn-secondary"}>缺房型</Link>
           <Link href="/admin/invalid-listings" className="btn-secondary">查看无效房源</Link>
           <Link href="/admin/ingestion" className="btn-secondary">返回采集管理</Link>
         </div>
       </div>
 
       <section className="grid gap-3 md:grid-cols-5">
-        <Metric label="总数" value={listings.length} />
+        <Metric label={is_missing_room_type_filter ? "缺房型总数" : "总数"} value={listings.length} />
         <Metric label="Active" value={countStatus(listings, "active")} />
         <Metric label="Invalid" value={countStatus(listings, "invalid")} />
+        {is_missing_room_type_filter ? (
+          <Metric label="原始房型为空" value={listings.filter((item) => isBlank(item.room_type)).length} />
+        ) : (
+          <Metric label="缺房型" value={countMissingRoomType(listings)} />
+        )}
         <Metric label="主人房" value={countRoomType(listings, "master_room")} />
-        <Metric label="普通房" value={countRoomType(listings, "common_room")} />
       </section>
 
       <section className="card overflow-hidden">
         <div className="border-b border-line px-4 py-3">
           <h2 className="font-semibold text-ink">Clean 列表</h2>
-          <p className="mt-1 text-sm text-muted">最多显示最近 200 条，按 listing_clean 创建时间倒序。</p>
+          <p className="mt-1 text-sm text-muted">
+            {is_missing_room_type_filter ? "当前显示全部 room_type 或 normalized_room_type 为空的清洗房源，按 listing_clean 创建时间倒序。" : "最多显示最近 200 条，按 listing_clean 创建时间倒序。"}
+          </p>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-[1200px] w-full border-collapse text-left text-sm">
@@ -110,7 +121,7 @@ export default async function CleanListingsAdminPage() {
             </tbody>
           </table>
         </div>
-        {listings.length === 0 ? <div className="px-4 py-8 text-center text-sm text-muted">当前没有清洗房源。</div> : null}
+        {listings.length === 0 ? <div className="px-4 py-8 text-center text-sm text-muted">{is_missing_room_type_filter ? "当前没有缺房型的清洗房源。" : "当前没有清洗房源。"}</div> : null}
       </section>
     </Shell>
   );
@@ -172,6 +183,14 @@ function countStatus(listings: CleanListingRow[], status: string) {
 
 function countRoomType(listings: CleanListingRow[], roomType: string) {
   return listings.filter((listing) => listing.normalized_room_type === roomType).length;
+}
+
+function countMissingRoomType(listings: CleanListingRow[]) {
+  return listings.filter((listing) => isBlank(listing.room_type) || isBlank(listing.normalized_room_type)).length;
+}
+
+function isBlank(value: string | null) {
+  return value === null || value.trim() === "";
 }
 
 function formatRoomType(value: string | null) {
