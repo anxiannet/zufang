@@ -142,6 +142,7 @@ OPENAI_MODEL=gpt-5-mini
 - 坐标缓存：`listing_indexes.latitude`、`listing_indexes.longitude`、`geocoded_at`、`geocode_source`
 - 通勤缓存：`listing_indexes.travel_time_bus_ntu/nus/smu/sutd`、`commute_computed_at`、`commute_source`
 - 队列状态：`commute_enrichment_jobs`
+- 同邮编复用：新房源邮编已存在坐标缓存时，直接复用本地坐标，不调用 OneMap Search；同邮编已存在完整目标学校通勤缓存时，直接复制 `travel_time_bus_*`，不调用 OneMap Route
 
 新增或更新 `listing_indexes` 后会自动进入通勤队列：
 

@@ -23,6 +23,24 @@ type ListingIndexRow = {
   longitude: number | null;
 };
 
+type PostalCodeCacheRow = {
+  id: string;
+  postal_code: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  travel_time_bus_ntu: number | null;
+  travel_time_bus_nus: number | null;
+  travel_time_bus_smu: number | null;
+  travel_time_bus_sutd: number | null;
+  commute_computed_at: string | null;
+};
+
+type GeocodingCacheRow = {
+  postal_code: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
 type SchoolLocation = {
   school_code: SchoolCode;
   latitude: number;
@@ -42,8 +60,9 @@ type OneMapSearchResult = {
 type GeocodeSuccess = {
   latitude: number;
   longitude: number;
-  confidence: "postal_code" | "address_text";
-  raw_result: OneMapSearchResult;
+  source: "onemap_search" | "listing_indexes_postal_code_cache" | "geocoding_cache";
+  confidence: "postal_code" | "address_text" | "postal_code_cache";
+  raw_result?: OneMapSearchResult;
 };
 
 export type RunCommuteEnrichmentOptions = {
@@ -113,9 +132,17 @@ export async function runCommuteEnrichment(optionsInput: RunCommuteEnrichmentOpt
         continue;
       }
 
+      const cachedTravelTimes = await fetchCachedTravelTimes(job, listing, schools);
+      if (cachedTravelTimes && Object.keys(cachedTravelTimes).length === schools.length) {
+        await updateListingCommute(job.listing_index_id, cachedTravelTimes, options.dryRun, "postal_code_cache");
+        summary.success_count += 1;
+        await markJob(job, "completed", null, options.dryRun);
+        continue;
+      }
+
       const routeResult = await computeRoutes(coords, schools);
       if (Object.keys(routeResult.travelTimes).length > 0) {
-        await updateListingCommute(job.listing_index_id, routeResult.travelTimes, options.dryRun);
+        await updateListingCommute(job.listing_index_id, routeResult.travelTimes, options.dryRun, "onemap_route_pt");
       }
 
       if (routeResult.errors.length > 0) {
@@ -179,7 +206,18 @@ async function ensureCoordinates(job: QueueRow, listing: ListingIndexRow, dryRun
     return { latitude: listing.latitude, longitude: listing.longitude };
   }
 
-  const query = cleanSearchQuery(job.postal_code ?? listing.postal_code) ?? cleanSearchQuery(job.address_text ?? listing.address_text);
+  const postalCode = cleanPostalCode(job.postal_code ?? listing.postal_code);
+  if (postalCode) {
+    const cached = await fetchCachedCoordinates(postalCode, listing.id);
+    if (cached) {
+      if (!dryRun) {
+        await updateListingCoordinates(job.listing_index_id, cached);
+      }
+      return { latitude: cached.latitude, longitude: cached.longitude };
+    }
+  }
+
+  const query = postalCode ?? cleanSearchQuery(job.address_text ?? listing.address_text);
   if (!query) {
     await markJob(job, "failed", "Missing postal_code and address_text for geocoding", dryRun);
     return null;
@@ -196,6 +234,80 @@ async function ensureCoordinates(job: QueueRow, listing: ListingIndexRow, dryRun
   }
 
   return { latitude: geocode.value.latitude, longitude: geocode.value.longitude };
+}
+
+async function fetchCachedCoordinates(postalCode: string, listingIndexId: string): Promise<GeocodeSuccess | null> {
+  const listingRows = await supabaseRequestWithRetry<PostalCodeCacheRow[]>(
+    [
+      "listing_indexes?select=id,postal_code,latitude,longitude,travel_time_bus_ntu,travel_time_bus_nus,travel_time_bus_smu,travel_time_bus_sutd,commute_computed_at",
+      `postal_code=eq.${encodeURIComponent(postalCode)}`,
+      `id=neq.${encodeURIComponent(listingIndexId)}`,
+      "latitude=not.is.null",
+      "longitude=not.is.null",
+      "order=commute_computed_at.desc.nullslast",
+      "limit=1"
+    ].join("&")
+  );
+  const listingCache = listingRows[0];
+  if (isFiniteCoordinate(listingCache?.latitude) && isFiniteCoordinate(listingCache?.longitude)) {
+    return {
+      latitude: listingCache.latitude,
+      longitude: listingCache.longitude,
+      source: "listing_indexes_postal_code_cache",
+      confidence: "postal_code_cache"
+    };
+  }
+
+  const geocodingRows = await supabaseRequestWithRetry<GeocodingCacheRow[]>(
+    `geocoding_cache?select=postal_code,latitude,longitude&postal_code=eq.${encodeURIComponent(postalCode)}&status=eq.success&latitude=not.is.null&longitude=not.is.null&limit=1`
+  );
+  const geocodingCache = geocodingRows[0];
+  if (isFiniteCoordinate(geocodingCache?.latitude) && isFiniteCoordinate(geocodingCache?.longitude)) {
+    return {
+      latitude: geocodingCache.latitude,
+      longitude: geocodingCache.longitude,
+      source: "geocoding_cache",
+      confidence: "postal_code_cache"
+    };
+  }
+
+  return null;
+}
+
+async function fetchCachedTravelTimes(job: QueueRow, listing: ListingIndexRow, schools: SchoolLocation[]): Promise<Record<string, number> | null> {
+  const postalCode = cleanPostalCode(job.postal_code ?? listing.postal_code);
+  if (!postalCode) return null;
+
+  const rows = await supabaseRequestWithRetry<PostalCodeCacheRow[]>(
+    [
+      "listing_indexes?select=id,postal_code,latitude,longitude,travel_time_bus_ntu,travel_time_bus_nus,travel_time_bus_smu,travel_time_bus_sutd,commute_computed_at",
+      `postal_code=eq.${encodeURIComponent(postalCode)}`,
+      `id=neq.${encodeURIComponent(listing.id)}`,
+      "commute_computed_at=not.is.null",
+      "order=commute_computed_at.desc.nullslast",
+      "limit=5"
+    ].join("&")
+  );
+
+  for (const row of rows) {
+    const travelTimes: Record<string, number> = {};
+    for (const school of schools) {
+      const value = getCachedTravelTime(row, school.school_code);
+      if (typeof value === "number") {
+        travelTimes[COMMUTE_COLUMNS[school.school_code]] = value;
+      }
+    }
+    if (Object.keys(travelTimes).length === schools.length) return travelTimes;
+  }
+
+  return null;
+}
+
+function getCachedTravelTime(row: PostalCodeCacheRow, school: SchoolCode): number | null {
+  if (school === "NTU") return row.travel_time_bus_ntu;
+  if (school === "NUS") return row.travel_time_bus_nus;
+  if (school === "SMU") return row.travel_time_bus_smu;
+  return row.travel_time_bus_sutd;
 }
 
 async function geocodeOneMap(query: string, confidence: GeocodeSuccess["confidence"]) {
@@ -226,7 +338,7 @@ async function geocodeOneMap(query: string, confidence: GeocodeSuccess["confiden
 
   return {
     ok: true as const,
-    value: { latitude, longitude, confidence, raw_result: result }
+    value: { latitude, longitude, source: "onemap_search" as const, confidence, raw_result: result }
   };
 }
 
@@ -290,13 +402,18 @@ async function updateListingCoordinates(listingIndexId: string, geocode: Geocode
       latitude: geocode.latitude,
       longitude: geocode.longitude,
       geocoded_at: new Date().toISOString(),
-      geocode_source: "onemap_search",
+      geocode_source: geocode.source,
       geocode_confidence: geocode.confidence
     })
   });
 }
 
-async function updateListingCommute(listingIndexId: string, travelTimes: Record<string, number>, dryRun: boolean): Promise<void> {
+async function updateListingCommute(
+  listingIndexId: string,
+  travelTimes: Record<string, number>,
+  dryRun: boolean,
+  source: "onemap_route_pt" | "postal_code_cache"
+): Promise<void> {
   if (dryRun) return;
   await supabaseRequestWithRetry(`listing_indexes?id=eq.${encodeURIComponent(listingIndexId)}`, {
     method: "PATCH",
@@ -304,7 +421,7 @@ async function updateListingCommute(listingIndexId: string, travelTimes: Record<
     body: JSON.stringify({
       ...travelTimes,
       commute_computed_at: new Date().toISOString(),
-      commute_source: "onemap_route_pt"
+      commute_source: source
     })
   });
 }
@@ -432,6 +549,11 @@ function clampLimit(value: string | undefined): number {
 function cleanSearchQuery(value: string | null | undefined): string | null {
   const cleaned = String(value ?? "").trim();
   return cleaned || null;
+}
+
+function cleanPostalCode(value: string | null | undefined): string | null {
+  const cleaned = String(value ?? "").trim();
+  return /^\d{6}$/.test(cleaned) ? cleaned : null;
 }
 
 function isFiniteCoordinate(value: unknown): value is number {
