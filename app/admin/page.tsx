@@ -73,6 +73,30 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       </section>
 
       <section className="card p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="font-semibold text-ink">租房 Pipeline 审计</h2>
+            <p className="mt-1 text-sm text-muted">从采集、清洗、过滤、索引到搜索调试，完整排查房源为什么出现、消失或排序靠前。</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/admin/ingestion" className="btn-secondary">采集层</Link>
+            <Link href="/admin/clean-listings" className="btn-secondary">清洗层</Link>
+            <Link href="/admin/invalid-listings" className="btn-secondary">无效房源</Link>
+            <Link href="/admin/index-listings" className="btn-secondary">索引层</Link>
+            <Link href="/admin/search-debug" className="btn-primary">搜索调试</Link>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-5">
+        <AdminNavCard href="/admin/ingestion" title="采集层" description="查看 ingestion_listings 原始抓取数据，处理新房源，重建全部索引。" />
+        <AdminNavCard href="/admin/clean-listings" title="清洗层" description="查看 listing_clean 的房型、三态字段、状态和结构化结果。" />
+        <AdminNavCard href="/admin/invalid-listings" title="无效房源" description="审计床位、搭房、日租、小时房等被过滤记录。" />
+        <AdminNavCard href="/admin/index-listings" title="索引层" description="查看 listing_indexes 的 summary、NTU 分、标签和匹配原因。" />
+        <AdminNavCard href="/admin/search-debug" title="搜索调试" description="输入自然语言搜索词，查看命中结果、得分和排序原因。" />
+      </section>
+
+      <section className="card p-4">
         <h2 className="mb-3 font-semibold">待审核房源</h2>
         <div className="space-y-3">
           {dashboard.pending.map((listing: any) => (
@@ -156,5 +180,14 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
       <h2 className="mb-3 font-semibold">{title}</h2>
       {children}
     </section>
+  );
+}
+
+function AdminNavCard({ href, title, description }: { href: string; title: string; description: string }) {
+  return (
+    <Link href={href} className="card block p-4 transition hover:-translate-y-0.5 hover:shadow-md">
+      <div className="font-semibold text-ink">{title}</div>
+      <p className="mt-2 text-sm text-muted">{description}</p>
+    </Link>
   );
 }
