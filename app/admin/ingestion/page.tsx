@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { deleteIngestionListing, getIngestionListings, processNewIngestionListings } from "@/actions/admin";
 import { getListingPipelineStats, rebuildListingPipeline } from "@/actions/rebuildListingPipeline";
+import { FormSubmitButton } from "@/components/admin/FormSubmitButton";
 import { getCurrentProfile } from "@/lib/auth";
 
 type PageProps = {
@@ -71,12 +72,12 @@ export default async function IngestionAdminPage({ searchParams }: PageProps) {
         </div>
         <div className="flex flex-wrap gap-2">
           <form action={processNewIngestionListings}>
-            <button className="btn-primary" type="submit">处理新房源</button>
+            <FormSubmitButton pendingText="正在处理新房源...">处理新房源</FormSubmitButton>
           </form>
           <form action={rebuildListingPipeline}>
-            <button className="btn-secondary border-red-200 bg-red-50 text-red-700 hover:bg-red-100" type="submit">
+            <FormSubmitButton pendingText="正在重建索引..." className="btn-secondary border-red-200 bg-red-50 text-red-700 hover:bg-red-100">
               重建全部索引
-            </button>
+            </FormSubmitButton>
           </form>
           <Link href="/admin" className="btn-secondary">返回后台</Link>
         </div>
