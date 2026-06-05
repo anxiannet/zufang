@@ -61,6 +61,11 @@ export async function markRemovedFromSource(source: string, sourceId: string): P
   });
 }
 
+export async function hasExistingRawDetail(source: string, sourceId: string): Promise<boolean> {
+  const existing = await findExistingListing(source, sourceId);
+  return Boolean(existing?.raw_detail_html);
+}
+
 async function findExistingListing(source: string, sourceId: string): Promise<ExistingListingRow | null> {
   const params = new URLSearchParams({
     select: "id,raw_detail_html",

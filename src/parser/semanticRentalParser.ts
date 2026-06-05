@@ -146,14 +146,14 @@ function normalizeRoomType(text: string, roomType: string | null): NormalizedRoo
   if (roomType && /studio|单间公寓|一房式公寓|studio\s*apartment/i.test(roomType)) return "studio";
   if (roomType && /主人房|主卧|master\s*room/i.test(roomType)) return "master_room";
   if (roomType && /普通房|普通间|大普通房|小普通房|客房|common\s*room/i.test(roomType)) return "common_room";
-  if (roomType && /单人间|小单人间|隔间|隔断|隔房|客厅房|客厅隔间|厅房|厅隔|佣人房|佣人间|储藏室|储物间|杂物房|utility\s*room|bomb\s*shelter|partition/i.test(roomType)) {
+  if (roomType && /单人房|小单人房|单人间|小单人间|隔间|隔断|隔房|客厅房|客厅隔间|厅房|厅隔|佣人房|佣人间|储藏室|储物间|杂物房|utility\s*room|bomb\s*shelter|partition/i.test(roomType)) {
     return "single_room";
   }
 
   if (/studio|单间公寓|一房式公寓|studio\s*apartment/i.test(source)) return "studio";
   if (/主人房|主卧|master\s*room/i.test(source)) return "master_room";
   if (/普通房|普通间|大普通房|小普通房|客房|common\s*room/i.test(source)) return "common_room";
-  if (/单人间|小单人间|隔间|隔断|隔房|客厅房|客厅隔间|厅房|厅隔|佣人房|佣人间|储藏室|储物间|杂物房|utility\s*room|bomb\s*shelter|partition/i.test(source)) {
+  if (/单人房|小单人房|单人间|小单人间|隔间|隔断|隔房|客厅房|客厅隔间|厅房|厅隔|佣人房|佣人间|储藏室|储物间|杂物房|utility\s*room|bomb\s*shelter|partition/i.test(source)) {
     return "single_room";
   }
   return "unknown";
@@ -164,7 +164,7 @@ function detectRoomTypeText(text: string): string | null {
     /studio|单间公寓|一房式公寓|studio\s*apartment/i,
     /主人房|主卧|master\s*room/i,
     /大普通房|小普通房|普通房|普通间|客房|common\s*room/i,
-    /单人间|小单人间|隔间|隔断|隔房|客厅房|客厅隔间|厅房|厅隔|佣人房|佣人间|储藏室|储物间|杂物房|utility\s*room|bomb\s*shelter|partition/i,
+    /单人房|小单人房|单人间|小单人间|隔间|隔断|隔房|客厅房|客厅隔间|厅房|厅隔|佣人房|佣人间|储藏室|储物间|杂物房|utility\s*room|bomb\s*shelter|partition/i,
     /床位|搭房|搭铺|床铺|床位出租|bed\s*space|bedspace/i
   ];
 

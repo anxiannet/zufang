@@ -42,4 +42,14 @@ const singleRoom = parseSemanticRentalFields({
 assert.equal(singleRoom.roomType, "储物间");
 assert.equal(singleRoom.normalizedRoomType, "single_room");
 
+const smallSingleRoom = parseSemanticRentalFields({
+  ...baseInput,
+  title: "黄线 近JCU SMU PSB 达科达地铁站 公寓：Sunny Spring 单人房 小单人房 出租",
+  bodyText: "Sunny Spring 小单人房出租，靠近达科达地铁站。",
+  rawDetailText: "黄线 近JCU SMU PSB 达科达地铁站 公寓：Sunny Spring 单人房 小单人房 出租\nSunny Spring 小单人房出租，靠近达科达地铁站。"
+});
+
+assert.equal(smallSingleRoom.roomType, "单人房");
+assert.equal(smallSingleRoom.normalizedRoomType, "single_room");
+
 console.log("semanticRentalParser tests passed");

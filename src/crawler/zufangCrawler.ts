@@ -1,5 +1,6 @@
 import dayjs from "dayjs";
-import { markRemovedFromSource, upsertRawListing } from "../db/listingRepository";
+import { hasExistingRawDetail, markRemovedFromSource, upsertRawListing } from "../db/listingRepository";
+import { deletedListingKey, findDeletedListings } from "../db/deletedListingRepository";
 import { CrawlMode, CrawlStats, CrawlSummary, CrawlTargetSummary, ListListing } from "../models/listing";
 import { config, CrawlTarget } from "../utils/config";
 import { HttpStatusError } from "./httpClient";
@@ -180,10 +181,21 @@ async function crawlTargetInternal(target: CrawlTarget, options: Required<CrawlO
     }
 
     const freshListings: ListListing[] = [];
+    const deletedListingKeys = await findDeletedListings(parsed.listings);
     let pageHadOldListings = false;
 
     for (const listing of parsed.listings) {
       stats.listingsParsed += 1;
+
+      if (deletedListingKeys.has(deletedListingKey(listing.source, listing.sourceId))) {
+        stats.listingsSkipped += 1;
+        logger.skip("listing skipped because it was admin deleted", {
+          page,
+          source_id: listing.sourceId,
+          detail_url: listing.detailUrl
+        });
+        continue;
+      }
 
       const listExclusion = getListingExclusionMatch(`${listing.listTitle ?? ""} ${listing.listRawText}`);
       if (listExclusion.excluded) {
@@ -218,6 +230,16 @@ async function crawlTargetInternal(target: CrawlTarget, options: Required<CrawlO
           detail_url: listing.detailUrl,
           posted_at: dayjs(listing.listPostedAt).format("YYYY-MM-DD HH:mm:ss")
         });
+      }
+
+      if (await hasExistingRawDetail(listing.source, listing.sourceId)) {
+        stats.listingsSkipped += 1;
+        logger.skip("listing detail already crawled, skip update", {
+          page,
+          source_id: listing.sourceId,
+          detail_url: listing.detailUrl
+        });
+        continue;
       }
 
       if (detailsScheduled >= maxDetails) {
