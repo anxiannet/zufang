@@ -8,8 +8,13 @@ export function extractPhone(text: string): string | null {
 }
 
 export function extractWechat(text: string): string | null {
-  const match = text.match(/(?:微信|微 信|wechat|weixin|wx|WX|WeChat)[:：\s号]*([a-zA-Z][a-zA-Z0-9_-]{4,30})/);
-  return match?.[1] ?? null;
+  const candidates = Array.from(
+    text.matchAll(/(?:微信(?:号)?|微\s*信(?:号)?|wechat|weixin|wx|WX|WeChat)\s*[:：号\-]?\s*([a-zA-Z0-9][a-zA-Z0-9_-]{4,30})/g)
+  )
+    .map((match) => normalizeWechatId(match[1]))
+    .filter((value): value is string => Boolean(value));
+
+  return candidates[0] ?? null;
 }
 
 export function extractWhatsappUrl(htmlOrText: string): string | null {
@@ -24,4 +29,13 @@ export function extractContactText(text: string): string | null {
     .find((item) => /^(联系|电话|手机|Whatsapp|WhatsApp|微信)/i.test(item));
 
   return line ?? extractPhone(text);
+}
+
+function normalizeWechatId(value: string | undefined): string | null {
+  if (!value) return null;
+  const cleaned = value.trim().replace(/[，。,.;；、)）】\]]+$/, "");
+  if (cleaned.length < 5 || cleaned.length > 30) return null;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]+$/.test(cleaned)) return null;
+  if (/^[3689]\d{7}$/.test(cleaned)) return null;
+  return cleaned;
 }
