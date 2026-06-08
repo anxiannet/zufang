@@ -22,7 +22,6 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
     roomType: cleanRow.room_type,
     normalizedRoomType: cleanRow.normalized_room_type,
     amenities: cleanRow.amenities,
-    addressText: cleanRow.address_text,
     postalCode: cleanRow.postal_code
   });
 
@@ -51,7 +50,6 @@ export function buildIndex(cleanRow: ListingCleanRow): ListingIndexRow {
     landlord_stay: cleanRow.landlord_stay,
     gender_preference: cleanRow.gender_preference,
     amenities: cleanRow.amenities,
-    address_text: cleanRow.address_text,
     postal_code: cleanRow.postal_code,
     fingerprint: cleanRow.fingerprint,
     indexed_at: new Date().toISOString(),
@@ -79,7 +77,6 @@ export function buildSearchText(input: {
   roomType: string | null;
   normalizedRoomType: string;
   amenities: string[];
-  addressText: string | null;
   postalCode: string | null;
 }): string {
   return cleanMultilineText([
@@ -90,7 +87,6 @@ export function buildSearchText(input: {
     input.roomType,
     input.normalizedRoomType,
     input.amenities.join(" "),
-    input.addressText,
     input.postalCode,
     input.cleanText
   ].filter(Boolean).join("\n"));
