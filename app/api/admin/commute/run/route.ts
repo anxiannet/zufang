@@ -55,7 +55,9 @@ export async function POST(request: Request) {
 
 function authorizeAdminRequest(request: Request): NextResponse | null {
   const secret = process.env.ADMIN_JOB_SECRET;
-  if (!secret) return null;
+  if (!secret) {
+    return NextResponse.json({ success: false, error: "ADMIN_JOB_SECRET is not configured" }, { status: 500 });
+  }
 
   const headerSecret = request.headers.get("x-admin-job-secret");
   if (headerSecret === secret) return null;
