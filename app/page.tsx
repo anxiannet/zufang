@@ -10,11 +10,11 @@ type NtuListing = {
   available_from: string | null;
   cooking_allowed: boolean | null;
   can_register_address: boolean | null;
-  landlord_stay: boolean | null;
-  bathroom_type: string | null;
-  current_tenant_count: number | null;
   gender_preference: string | null;
+  summary: string | null;
 };
+
+type CleanListingRow = Omit<NtuListing, "summary">;
 
 const ntuAreas = ["Boon Lay", "Pioneer", "Lakeside", "Jurong East", "Chinese Garden", "Clementi"];
 
@@ -28,7 +28,7 @@ const roomTypeLabels: Record<string, string> = {
   studio: "Studio"
 };
 
-function labelRoomType(listing: NtuListing) {
+function labelRoomType(listing: NtuListing | CleanListingRow) {
   const raw = listing.normalized_room_type || listing.room_type || "房间";
   return roomTypeLabels[raw] ?? raw;
 }
@@ -51,23 +51,8 @@ function labelGender(value: string | null) {
   return value;
 }
 
-function buildIntro(listing: NtuListing) {
-  return `位于${labelArea(listing.mrt_area)}的${labelRoomType(listing)}，适合希望兼顾预算与通勤效率的NTU学生。`;
-}
-
-function buildReasons(listing: NtuListing) {
-  const reasons = ["NTU通勤圈内", listing.current_tenant_count !== null && listing.current_tenant_count <= 4 ? "房屋人数较少" : null, listing.cooking_allowed ? "可做饭" : null, "西部生活配套成熟"];
-  return reasons.filter(Boolean) as string[];
-}
-
-function buildSuitableFor(listing: NtuListing) {
-  const people = ["NTU本科生", "NTU研究生", "单人入住", listing.cooking_allowed ? "需要做饭的租客" : "安静型租客"];
-  return people;
-}
-
-function buildRisks(listing: NtuListing) {
-  const risks = ["需自行核实房东身份与房源真实性", listing.bathroom_type && !listing.bathroom_type.includes("独立") ? "可能需要与他人共用卫生间" : null, listing.landlord_stay ? "屋主同住，生活习惯需提前确认" : null, "水电网费用与租期需再次确认"];
-  return risks.filter(Boolean) as string[];
+function fallbackSummary(listing: NtuListing) {
+  return `位于${labelArea(listing.mrt_area)}的${labelRoomType(listing)}，邮编${listing.postal_code ?? "待确认"}，可作为了解 NTU 西部通勤圈房源的参考信息。`;
 }
 
 async function getNtuListings() {
@@ -76,7 +61,7 @@ async function getNtuListings() {
 
   const { data, error } = await supabase
     .from("listing_clean")
-    .select("id,price,mrt_area,postal_code,room_type,normalized_room_type,available_from,cooking_allowed,can_register_address,landlord_stay,bathroom_type,current_tenant_count,gender_preference")
+    .select("id,price,mrt_area,postal_code,room_type,normalized_room_type,available_from,cooking_allowed,can_register_address,gender_preference")
     .not("postal_code", "is", null)
     .neq("postal_code", "")
     .or(orFilter)
@@ -88,7 +73,41 @@ async function getNtuListings() {
     return [];
   }
 
-  return (data ?? []) as NtuListing[];
+  const cleanRows = (data ?? []) as CleanListingRow[];
+  const cleanIds = cleanRows.map((listing) => listing.id);
+  if (cleanIds.length === 0) return [];
+
+  const { data: indexRows } = await supabase
+    .from("listing_indexes")
+    .select("id,clean_listing_id,summary")
+    .in("clean_listing_id", cleanIds);
+
+  const indexByCleanId = new Map<string, { id: string; summary: string | null }>();
+  for (const row of indexRows ?? []) {
+    indexByCleanId.set(row.clean_listing_id, { id: row.id, summary: row.summary ?? null });
+  }
+
+  const indexIds = [...indexByCleanId.values()].map((row) => row.id);
+  const summaryByIndexId = new Map<string, string>();
+
+  if (indexIds.length > 0) {
+    const { data: aiRows } = await supabase
+      .from("listing_ai_analysis")
+      .select("listing_index_id,summary_ai")
+      .in("listing_index_id", indexIds);
+
+    for (const row of aiRows ?? []) {
+      if (row.summary_ai) summaryByIndexId.set(row.listing_index_id, row.summary_ai);
+    }
+  }
+
+  return cleanRows.map((listing) => {
+    const index = indexByCleanId.get(listing.id);
+    return {
+      ...listing,
+      summary: index ? summaryByIndexId.get(index.id) ?? index.summary ?? null : null
+    };
+  }) as NtuListing[];
 }
 
 export default async function HomePage() {
@@ -130,7 +149,7 @@ export default async function HomePage() {
       </section>
 
       <section className="card p-5 text-sm leading-7 text-muted">
-        这些房源已优先筛选出有邮编、靠近 NTU 通勤圈的房源。后续会继续补充真实通勤时间、AI推荐理由和屋主认证。当前先以“能快速判断是否适合 NTU 学生”为目标。
+        这些房源已优先筛选出有邮编、靠近 NTU 通勤圈的房源。后续会继续补充真实通勤时间和屋主认证。当前先以“能快速判断是否适合 NTU 学生”为目标。
       </section>
 
       <section className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm leading-7 text-amber-900">
@@ -148,8 +167,7 @@ export default async function HomePage() {
           {listings.map((listing) => (
             <article key={listing.id} className="card overflow-hidden p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <div className="mb-4 rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
-                <div className="text-sm font-semibold text-brand">AI整理房源</div>
-                <h2 className="mt-2 text-xl font-bold text-ink">{labelArea(listing.mrt_area)} · {labelRoomType(listing)}</h2>
+                <h2 className="text-xl font-bold text-ink">{labelArea(listing.mrt_area)} · {labelRoomType(listing)}</h2>
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-sm text-ink">
@@ -163,30 +181,9 @@ export default async function HomePage() {
                 <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">报地址：</span>{labelBoolean(listing.can_register_address, "可", "待确认")}</div>
               </div>
 
-              <div className="mt-4 space-y-4 text-sm leading-6 text-ink">
-                <section>
-                  <h3 className="font-semibold">AI简介</h3>
-                  <p className="mt-1 text-muted">{buildIntro(listing)}</p>
-                </section>
-                <section>
-                  <h3 className="font-semibold">AI推荐理由</h3>
-                  <ul className="mt-1 list-disc space-y-1 pl-5 text-muted">
-                    {buildReasons(listing).map((item) => <li key={item}>{item}</li>)}
-                  </ul>
-                </section>
-                <section>
-                  <h3 className="font-semibold">AI适合人群</h3>
-                  <ul className="mt-1 list-disc space-y-1 pl-5 text-muted">
-                    {buildSuitableFor(listing).map((item) => <li key={item}>{item}</li>)}
-                  </ul>
-                </section>
-                <section>
-                  <h3 className="font-semibold">AI风险提醒</h3>
-                  <ul className="mt-1 list-disc space-y-1 pl-5 text-muted">
-                    {buildRisks(listing).map((item) => <li key={item}>{item}</li>)}
-                  </ul>
-                </section>
-              </div>
+              <p className="mt-4 rounded-lg bg-teal-50 px-3 py-3 text-sm leading-6 text-muted">
+                {listing.summary || fallbackSummary(listing)}
+              </p>
             </article>
           ))}
         </section>
