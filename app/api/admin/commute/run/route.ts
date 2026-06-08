@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runCommuteEnrichment, type SchoolCode } from "@/scripts/enrichCommute";
+import { ensureOneMapTokenEnv } from "@/src/services/oneMapToken";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,7 @@ export async function POST(request: Request) {
     const school = parseSchool(body?.school);
     const dryRun = body?.dryRun === true;
 
+    await ensureOneMapTokenEnv();
     const result = await runCommuteEnrichment({ limit, school, dryRun });
 
     return NextResponse.json({
