@@ -104,15 +104,52 @@ function normalizeListingIndexQueueInput(row: ListingIndexQueueInput): Normalize
   return {
     id: row.id,
     postal_code: row.postal_code,
-    address_text: firstNonEmpty(row.search_text, row.title, row.summary, row.mrt_area),
+    address_text: buildFallbackAddress(row),
     status: row.status
   };
 }
 
-function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
+function buildFallbackAddress(row: ListingIndexQueueInput): string | null {
+  const postalFromText = extractPostalCode(row.search_text) ?? extractPostalCode(row.summary) ?? extractPostalCode(row.title);
+  if (postalFromText) return postalFromText;
+
+  const blockStreet = extractBlockStreet(row.title) ?? extractBlockStreet(row.summary) ?? extractBlockStreet(row.search_text);
+  if (blockStreet) return blockStreet;
+
+  return firstUsefulLocation(row.title, row.summary, row.mrt_area);
+}
+
+function extractPostalCode(value: string | null | undefined): string | null {
+  const match = String(value ?? "").match(/\b\d{6}\b/);
+  return match?.[0] ?? null;
+}
+
+function extractBlockStreet(value: string | null | undefined): string | null {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+
+  const blockMatch = text.match(/\b(?:blk|block)\s*([0-9]{1,4}[a-z]?)\b/i);
+  if (!blockMatch) return null;
+
+  const before = text.slice(0, blockMatch.index).split(/[\n,|;]/).pop()?.trim() ?? "";
+  const after = text.slice((blockMatch.index ?? 0) + blockMatch[0].length).split(/[\n,|;$]/)[0]?.trim() ?? "";
+  const block = `Blk ${blockMatch[1]}`;
+  const candidate = [before, block, after].filter(Boolean).join(" ").trim();
+
+  return candidate.length >= block.length ? candidate : block;
+}
+
+function firstUsefulLocation(...values: Array<string | null | undefined>): string | null {
   for (const value of values) {
     const text = String(value ?? "").trim();
-    if (text) return text;
+    if (!text) continue;
+    if (isGenericLocation(text)) continue;
+    return text.slice(0, 180);
   }
   return null;
+}
+
+function isGenericLocation(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return ["common room", "master room", "room", "studio"].includes(normalized);
 }
