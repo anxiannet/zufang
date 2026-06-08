@@ -2,7 +2,6 @@ import { createClient } from "@/lib/supabase/server";
 
 type NtuListing = {
   id: string;
-  title: string | null;
   price: number | null;
   mrt_area: string | null;
   postal_code: string | null;
@@ -15,8 +14,6 @@ type NtuListing = {
   bathroom_type: string | null;
   current_tenant_count: number | null;
   gender_preference: string | null;
-  image_urls: string[] | null;
-  clean_text: string | null;
 };
 
 const ntuAreas = ["Boon Lay", "Pioneer", "Lakeside", "Jurong East", "Chinese Garden", "Clementi"];
@@ -42,11 +39,35 @@ function labelBoolean(value: boolean | null, positive: string, negative: string,
   return unknown;
 }
 
-function buildReason(listing: NtuListing) {
-  const parts = [listing.mrt_area, labelRoomType(listing), listing.cooking_allowed ? "可煮" : null, listing.landlord_stay === false ? "无屋主同住" : null]
-    .filter(Boolean)
-    .join(" · ");
-  return parts ? `适合想住在 NTU 西部通勤圈、重视生活便利的学生。${parts}。` : "适合想优先查看 NTU 西部通勤圈房源的学生。";
+function labelArea(area: string | null) {
+  if (!area) return "NTU西部区域";
+  return `${area.split(",")[0].trim()} 区域`;
+}
+
+function labelGender(value: string | null) {
+  if (!value || value === "any" || value === "不限") return "不限";
+  if (value.toLowerCase().includes("female") || value.includes("女")) return "限女生";
+  if (value.toLowerCase().includes("male") || value.includes("男")) return "限男生";
+  return value;
+}
+
+function buildIntro(listing: NtuListing) {
+  return `位于${labelArea(listing.mrt_area)}的${labelRoomType(listing)}，适合希望兼顾预算与通勤效率的NTU学生。`;
+}
+
+function buildReasons(listing: NtuListing) {
+  const reasons = ["NTU通勤圈内", listing.current_tenant_count !== null && listing.current_tenant_count <= 4 ? "房屋人数较少" : null, listing.cooking_allowed ? "可做饭" : null, "西部生活配套成熟"];
+  return reasons.filter(Boolean) as string[];
+}
+
+function buildSuitableFor(listing: NtuListing) {
+  const people = ["NTU本科生", "NTU研究生", "单人入住", listing.cooking_allowed ? "需要做饭的租客" : "安静型租客"];
+  return people;
+}
+
+function buildRisks(listing: NtuListing) {
+  const risks = ["需自行核实房东身份与房源真实性", listing.bathroom_type && !listing.bathroom_type.includes("独立") ? "可能需要与他人共用卫生间" : null, listing.landlord_stay ? "屋主同住，生活习惯需提前确认" : null, "水电网费用与租期需再次确认"];
+  return risks.filter(Boolean) as string[];
 }
 
 async function getNtuListings() {
@@ -55,7 +76,7 @@ async function getNtuListings() {
 
   const { data, error } = await supabase
     .from("listing_clean")
-    .select("id,title,price,mrt_area,postal_code,room_type,normalized_room_type,available_from,cooking_allowed,can_register_address,landlord_stay,bathroom_type,current_tenant_count,gender_preference,image_urls,clean_text")
+    .select("id,price,mrt_area,postal_code,room_type,normalized_room_type,available_from,cooking_allowed,can_register_address,landlord_stay,bathroom_type,current_tenant_count,gender_preference")
     .not("postal_code", "is", null)
     .neq("postal_code", "")
     .or(orFilter)
@@ -72,7 +93,8 @@ async function getNtuListings() {
 
 export default async function HomePage() {
   const listings = await getNtuListings();
-  const averagePrice = listings.length > 0 ? Math.round(listings.reduce((sum, listing) => sum + (listing.price ?? 0), 0) / listings.filter((listing) => listing.price).length) : null;
+  const pricedListings = listings.filter((listing) => typeof listing.price === "number" && listing.price > 0);
+  const averagePrice = pricedListings.length > 0 ? Math.round(pricedListings.reduce((sum, listing) => sum + (listing.price ?? 0), 0) / pricedListings.length) : null;
 
   return (
     <div className="mx-auto max-w-6xl space-y-8 px-4 py-6">
@@ -123,43 +145,50 @@ export default async function HomePage() {
         <section className="card p-8 text-center text-muted">暂时没有可展示的 NTU 房源。请检查 listing_clean 的 RLS 读取权限或房源状态。</section>
       ) : (
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {listings.map((listing) => {
-            const image = listing.image_urls?.[0];
-            return (
-              <article key={listing.id} className="card overflow-hidden shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-                <div className="aspect-[4/3] bg-gray-100">
-                  {image ? <img src={image} alt={listing.title ?? "NTU房源"} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-sm text-muted">暂无图片</div>}
-                </div>
-                <div className="space-y-3 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="line-clamp-2 font-semibold text-ink">{listing.title ?? "NTU附近房源"}</h2>
-                      <p className="mt-1 text-sm text-muted">{listing.mrt_area ?? "NTU西部区域"} · 邮编 {listing.postal_code}</p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-lg font-bold text-brand">{listing.price ? `$${listing.price}` : "询价"}</div>
-                      <div className="text-xs text-muted">/月</div>
-                    </div>
-                  </div>
+          {listings.map((listing) => (
+            <article key={listing.id} className="card overflow-hidden p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+              <div className="mb-4 rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
+                <div className="text-sm font-semibold text-brand">AI整理房源</div>
+                <h2 className="mt-2 text-xl font-bold text-ink">{labelArea(listing.mrt_area)} · {labelRoomType(listing)}</h2>
+              </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs text-ink">
-                    <span className="rounded bg-gray-50 px-2 py-1">{labelRoomType(listing)}</span>
-                    <span className="rounded bg-gray-50 px-2 py-1">{listing.available_from || "入住待确认"}</span>
-                    <span className="rounded bg-gray-50 px-2 py-1">{labelBoolean(listing.cooking_allowed, "可煮", "不可煮")}</span>
-                    <span className="rounded bg-gray-50 px-2 py-1">{labelBoolean(listing.can_register_address, "可报地址", "不可报地址")}</span>
-                    <span className="rounded bg-gray-50 px-2 py-1">{labelBoolean(listing.landlord_stay, "屋主同住", "无屋主同住")}</span>
-                    <span className="rounded bg-gray-50 px-2 py-1">已住 {listing.current_tenant_count ?? "待确认"}</span>
-                  </div>
+              <div className="grid grid-cols-2 gap-2 text-sm text-ink">
+                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">房型：</span>{labelRoomType(listing)}</div>
+                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">租金：</span>{listing.price ? `$${listing.price}` : "询价"}</div>
+                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">区域：</span>{labelArea(listing.mrt_area)}</div>
+                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">邮编：</span>{listing.postal_code}</div>
+                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">入住：</span>{listing.available_from || "待确认"}</div>
+                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">性别：</span>{labelGender(listing.gender_preference)}</div>
+                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">可煮：</span>{labelBoolean(listing.cooking_allowed, "可", "不可")}</div>
+                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">报地址：</span>{labelBoolean(listing.can_register_address, "可", "待确认")}</div>
+              </div>
 
-                  <p className="rounded-lg bg-teal-50 px-3 py-2 text-xs leading-5 text-ink">{buildReason(listing)}</p>
-                  <div className="flex items-center justify-between border-t border-line pt-3 text-sm">
-                    <span className="text-muted">联系方式进群/私信获取</span>
-                    <span className="font-semibold text-brand">查看详情</span>
-                  </div>
-                </div>
-              </article>
-            );
-          })}
+              <div className="mt-4 space-y-4 text-sm leading-6 text-ink">
+                <section>
+                  <h3 className="font-semibold">AI简介</h3>
+                  <p className="mt-1 text-muted">{buildIntro(listing)}</p>
+                </section>
+                <section>
+                  <h3 className="font-semibold">AI推荐理由</h3>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-muted">
+                    {buildReasons(listing).map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </section>
+                <section>
+                  <h3 className="font-semibold">AI适合人群</h3>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-muted">
+                    {buildSuitableFor(listing).map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </section>
+                <section>
+                  <h3 className="font-semibold">AI风险提醒</h3>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-muted">
+                    {buildRisks(listing).map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </section>
+              </div>
+            </article>
+          ))}
         </section>
       )}
 
