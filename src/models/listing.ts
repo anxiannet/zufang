@@ -138,7 +138,6 @@ export interface ListingIndexRow {
   landlord_stay: boolean | null;
   gender_preference: string | null;
   amenities: string[];
-  address_text: string | null;
   postal_code: string | null;
   fingerprint: string;
   indexed_at: string;
