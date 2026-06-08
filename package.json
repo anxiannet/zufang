@@ -12,6 +12,7 @@
     "crawl:shichengbbs:test": "CRAWL_SOURCE=shichengbbs.com MAX_PAGES_PER_RUN=1 MAX_DETAILS_PER_RUN=10 MAX_INSERTED_PER_RUN=10 tsx src/index.ts",
     "index:listings": "tsx src/indexer/index.ts",
     "enrich:commute": "tsx scripts/enrichCommute.ts",
+    "worker:commute": "tsx scripts/commuteWorker.ts",
     "enrich:ai": "tsx scripts/enrichAiAnalysis.ts",
     "test:ingestion": "tsx src/tests/zufangDetailParser.test.ts && tsx src/tests/listingExclusion.test.ts && tsx src/tests/semanticRentalParser.test.ts"
   },
