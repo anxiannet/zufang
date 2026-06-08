@@ -6,6 +6,7 @@ type NtuListing = {
   mrt_area: string | null;
   postal_code: string | null;
   geocode_block: string | null;
+  commute_minutes: number | null;
   tags: string[] | null;
   amenities: string[] | null;
   room_type: string | null;
@@ -15,9 +16,31 @@ type NtuListing = {
   gender_preference: string | null;
 };
 
-type CleanListingRow = Omit<NtuListing, "geocode_block">;
+type CommuteRow = {
+  listing_index_id: string;
+  duration_minutes: number | null;
+};
 
-const ntuAreas = ["Boon Lay", "Pioneer", "Lakeside", "Jurong East", "Chinese Garden", "Clementi"];
+type IndexRow = {
+  id: string;
+  clean_listing_id: string | null;
+  price: number | null;
+  mrt_area: string | null;
+  postal_code: string | null;
+  tags: string[] | null;
+  amenities: string[] | null;
+  room_type: string | null;
+  normalized_room_type: string | null;
+  cooking_allowed: boolean | null;
+  gender_preference: string | null;
+};
+
+type CleanRow = {
+  id: string;
+  available_from: string | null;
+};
+
+const quickAreas = ["≤30分钟", "31-45分钟", "46-60分钟"];
 
 const roomTypeLabels: Record<string, string> = {
   common_room: "普通房",
@@ -35,7 +58,7 @@ function labelRoomType(listing: NtuListing) {
 }
 
 function labelArea(area: string | null) {
-  if (!area) return "NTU西部区域";
+  if (!area) return "NTU通勤圈";
   return `${area.split(",")[0].trim()} 区域`;
 }
 
@@ -62,7 +85,9 @@ function cleanTag(tag: string) {
 }
 
 function buildTags(listing: NtuListing) {
+  const commuteTag = listing.commute_minutes ? `到NTU约${listing.commute_minutes}分钟` : null;
   const baseTags = [
+    commuteTag,
     listing.cooking_allowed === true ? "可煮" : null,
     labelGender(listing.gender_preference) !== "不限" ? labelGender(listing.gender_preference) : null,
     labelRoomType(listing),
@@ -76,27 +101,67 @@ function buildTags(listing: NtuListing) {
   return Array.from(new Set([...baseTags, ...dbTags].filter(Boolean) as string[])).slice(0, 8);
 }
 
+function groupCount(listings: NtuListing[], max: number, min = 0) {
+  return listings.filter((listing) => {
+    const minutes = listing.commute_minutes ?? 999;
+    return minutes > min && minutes <= max;
+  }).length;
+}
+
 async function getNtuListings() {
   const supabase = await createClient();
-  const orFilter = ntuAreas.map((area) => `mrt_area.ilike.%${area}%`).join(",");
 
-  const { data, error } = await supabase
-    .from("listing_clean")
-    .select("id,price,mrt_area,postal_code,tags,amenities,room_type,normalized_room_type,available_from,cooking_allowed,gender_preference")
-    .not("postal_code", "is", null)
-    .neq("postal_code", "")
-    .or(orFilter)
-    .order("price", { ascending: true, nullsFirst: false })
-    .limit(32);
+  const { data: commuteData, error: commuteError } = await supabase
+    .from("listing_commute_cache")
+    .select("listing_index_id,duration_minutes")
+    .eq("school_code", "NTU")
+    .eq("mode", "bus")
+    .eq("status", "success")
+    .lte("duration_minutes", 60)
+    .order("duration_minutes", { ascending: true })
+    .limit(60);
 
-  if (error) {
-    console.error("Failed to load NTU listings", error.message);
+  if (commuteError) {
+    console.error("Failed to load NTU commute cache", commuteError.message);
     return [];
   }
 
-  const cleanRows = (data ?? []) as CleanListingRow[];
-  const postalCodes = Array.from(new Set(cleanRows.map((listing) => listing.postal_code).filter(Boolean) as string[]));
+  const commuteRows = (commuteData ?? []) as CommuteRow[];
+  const indexIds = commuteRows.map((row) => row.listing_index_id).filter(Boolean);
+  if (indexIds.length === 0) return [];
+
+  const commuteByIndexId = new Map<string, number>();
+  for (const row of commuteRows) {
+    if (row.duration_minutes !== null) commuteByIndexId.set(row.listing_index_id, row.duration_minutes);
+  }
+
+  const { data: indexData, error: indexError } = await supabase
+    .from("listing_indexes")
+    .select("id,clean_listing_id,price,mrt_area,postal_code,tags,amenities,room_type,normalized_room_type,cooking_allowed,gender_preference")
+    .in("id", indexIds)
+    .eq("status", "active");
+
+  if (indexError) {
+    console.error("Failed to load listing indexes", indexError.message);
+    return [];
+  }
+
+  const indexRows = (indexData ?? []) as IndexRow[];
+  const cleanIds = Array.from(new Set(indexRows.map((listing) => listing.clean_listing_id).filter(Boolean) as string[]));
+  const postalCodes = Array.from(new Set(indexRows.map((listing) => listing.postal_code).filter(Boolean) as string[]));
+  const availableFromByCleanId = new Map<string, string | null>();
   const blockByPostalCode = new Map<string, string>();
+
+  if (cleanIds.length > 0) {
+    const { data: cleanData } = await supabase
+      .from("listing_clean")
+      .select("id,available_from")
+      .in("id", cleanIds);
+
+    for (const row of (cleanData ?? []) as CleanRow[]) {
+      availableFromByCleanId.set(row.id, row.available_from);
+    }
+  }
 
   if (postalCodes.length > 0) {
     const { data: geocodingRows } = await supabase
@@ -110,10 +175,23 @@ async function getNtuListings() {
     }
   }
 
-  return cleanRows.map((listing) => ({
-    ...listing,
-    geocode_block: listing.postal_code ? blockByPostalCode.get(listing.postal_code) ?? null : null
-  })) as NtuListing[];
+  return indexRows
+    .map((listing) => ({
+      id: listing.id,
+      price: listing.price,
+      mrt_area: listing.mrt_area,
+      postal_code: listing.postal_code,
+      geocode_block: listing.postal_code ? blockByPostalCode.get(listing.postal_code) ?? null : null,
+      commute_minutes: commuteByIndexId.get(listing.id) ?? null,
+      tags: listing.tags,
+      amenities: listing.amenities,
+      room_type: listing.room_type,
+      normalized_room_type: listing.normalized_room_type,
+      available_from: listing.clean_listing_id ? availableFromByCleanId.get(listing.clean_listing_id) ?? null : null,
+      cooking_allowed: listing.cooking_allowed,
+      gender_preference: listing.gender_preference
+    }))
+    .sort((a, b) => (a.commute_minutes ?? 999) - (b.commute_minutes ?? 999));
 }
 
 export default async function HomePage() {
@@ -128,13 +206,13 @@ export default async function HomePage() {
           <div className="space-y-4">
             <div className="inline-flex rounded-full bg-teal-50 px-3 py-1 text-sm font-semibold text-brand">ntu.weijie.sg</div>
             <div className="space-y-3">
-              <h1 className="text-3xl font-bold tracking-tight text-ink md:text-5xl">NTU精选房源</h1>
+              <h1 className="text-3xl font-bold tracking-tight text-ink md:text-5xl">NTU 60分钟通勤圈房源</h1>
               <p className="max-w-3xl text-base leading-7 text-muted md:text-lg">
-                为中国来新加坡 NTU 留学生整理的西部真实房源，优先展示有邮编、靠近文礼 / 先驱 / 湖畔 / 裕廊区域的房间。
+                优先展示已计算真实公交通勤、到 NTU 约 60 分钟以内的房源，按通勤时间从短到长排序。
               </p>
             </div>
             <div className="flex flex-wrap gap-2 text-sm text-ink">
-              {ntuAreas.map((area) => (
+              {quickAreas.map((area) => (
                 <span key={area} className="rounded-full bg-gray-50 px-3 py-1">
                   {area}
                 </span>
@@ -144,7 +222,7 @@ export default async function HomePage() {
           <div className="grid grid-cols-2 gap-3 text-center">
             <div className="rounded-xl bg-gray-50 p-4">
               <div className="text-2xl font-bold text-brand">{listings.length}</div>
-              <div className="mt-1 text-xs text-muted">当前展示</div>
+              <div className="mt-1 text-xs text-muted">60分钟内</div>
             </div>
             <div className="rounded-xl bg-gray-50 p-4">
               <div className="text-2xl font-bold text-brand">{averagePrice ? `$${averagePrice}` : "待算"}</div>
@@ -154,8 +232,14 @@ export default async function HomePage() {
         </div>
       </section>
 
+      <section className="grid gap-3 text-sm sm:grid-cols-3">
+        <div className="card p-4"><span className="font-semibold text-brand">≤30分钟：</span>{groupCount(listings, 30)} 间</div>
+        <div className="card p-4"><span className="font-semibold text-brand">31-45分钟：</span>{groupCount(listings, 45, 30)} 间</div>
+        <div className="card p-4"><span className="font-semibold text-brand">46-60分钟：</span>{groupCount(listings, 60, 45)} 间</div>
+      </section>
+
       <section className="card p-5 text-sm leading-7 text-muted">
-        这些房源已优先筛选出有邮编、靠近 NTU 通勤圈的房源。后续会继续补充真实通勤时间和屋主认证。当前先以“能快速判断是否适合 NTU 学生”为目标。
+        通勤时间来自缓存计算结果，仅作为初步筛选参考；实际路线、等待时间和上课地点可能影响最终通勤体验。
       </section>
 
       <section className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm leading-7 text-amber-900">
@@ -167,15 +251,20 @@ export default async function HomePage() {
       </section>
 
       {listings.length === 0 ? (
-        <section className="card p-8 text-center text-muted">暂时没有可展示的 NTU 房源。请检查 listing_clean 的 RLS 读取权限或房源状态。</section>
+        <section className="card p-8 text-center text-muted">暂时没有 NTU 60分钟内通勤房源。请先运行通勤计算或检查 listing_commute_cache。</section>
       ) : (
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {listings.map((listing) => (
             <article key={listing.id} className="card overflow-hidden p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <div className="rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
                 <h2 className="text-xl font-bold text-ink">{buildTitle(listing)}</h2>
-                <div className="mt-3 text-2xl font-bold text-brand">
-                  {listing.price ? `$${listing.price}` : "询价"}<span className="text-sm font-medium text-muted"> / 月</span>
+                <div className="mt-3 flex items-end justify-between gap-3">
+                  <div className="text-2xl font-bold text-brand">
+                    {listing.price ? `$${listing.price}` : "询价"}<span className="text-sm font-medium text-muted"> / 月</span>
+                  </div>
+                  <div className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-brand shadow-sm">
+                    {listing.commute_minutes}分钟
+                  </div>
                 </div>
               </div>
 
