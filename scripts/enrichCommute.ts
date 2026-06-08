@@ -3,6 +3,8 @@ import { supabaseRequest } from "../src/db/pool";
 export type SchoolCode = "NTU" | "NUS" | "SMU" | "SUTD";
 type JobStatus = "pending" | "retry" | "completed" | "failed";
 
+const BUS_MODE = "bus";
+
 type QueueRow = {
   id: string;
   listing_index_id: string;
@@ -23,16 +25,20 @@ type ListingIndexRow = {
   longitude: number | null;
 };
 
-type PostalCodeCacheRow = {
+type ListingCoordinateCacheRow = {
   id: string;
   postal_code: string | null;
   latitude: number | null;
   longitude: number | null;
-  travel_time_bus_ntu: number | null;
-  travel_time_bus_nus: number | null;
-  travel_time_bus_smu: number | null;
-  travel_time_bus_sutd: number | null;
-  commute_computed_at: string | null;
+  commute_computed_at?: string | null;
+};
+
+type CommuteCacheRow = {
+  listing_index_id: string;
+  school_code: SchoolCode;
+  mode: string;
+  duration_minutes: number | null;
+  computed_at: string | null;
 };
 
 type GeocodingCacheRow = {
@@ -82,13 +88,6 @@ export type RunCommuteEnrichmentSummary = {
 };
 
 const SCHOOL_CODES: SchoolCode[] = ["NTU", "NUS", "SMU", "SUTD"];
-const COMMUTE_COLUMNS: Record<SchoolCode, string> = {
-  NTU: "travel_time_bus_ntu",
-  NUS: "travel_time_bus_nus",
-  SMU: "travel_time_bus_smu",
-  SUTD: "travel_time_bus_sutd"
-};
-
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 const DEFAULT_ROUTE_TIME = "08:30:00";
@@ -237,14 +236,14 @@ async function ensureCoordinates(job: QueueRow, listing: ListingIndexRow, dryRun
 }
 
 async function fetchCachedCoordinates(postalCode: string, listingIndexId: string): Promise<GeocodeSuccess | null> {
-  const listingRows = await supabaseRequestWithRetry<PostalCodeCacheRow[]>(
+  const listingRows = await supabaseRequestWithRetry<ListingCoordinateCacheRow[]>(
     [
-      "listing_indexes?select=id,postal_code,latitude,longitude,travel_time_bus_ntu,travel_time_bus_nus,travel_time_bus_smu,travel_time_bus_sutd,commute_computed_at",
+      "listing_indexes?select=id,postal_code,latitude,longitude,commute_computed_at",
       `postal_code=eq.${encodeURIComponent(postalCode)}`,
       `id=neq.${encodeURIComponent(listingIndexId)}`,
       "latitude=not.is.null",
       "longitude=not.is.null",
-      "order=commute_computed_at.desc.nullslast",
+      "order=geocoded_at.desc.nullslast",
       "limit=1"
     ].join("&")
   );
@@ -274,40 +273,46 @@ async function fetchCachedCoordinates(postalCode: string, listingIndexId: string
   return null;
 }
 
-async function fetchCachedTravelTimes(job: QueueRow, listing: ListingIndexRow, schools: SchoolLocation[]): Promise<Record<string, number> | null> {
+async function fetchCachedTravelTimes(job: QueueRow, listing: ListingIndexRow, schools: SchoolLocation[]): Promise<Record<SchoolCode, number> | null> {
   const postalCode = cleanPostalCode(job.postal_code ?? listing.postal_code);
   if (!postalCode) return null;
 
-  const rows = await supabaseRequestWithRetry<PostalCodeCacheRow[]>(
+  const siblingListings = await supabaseRequestWithRetry<Array<{ id: string }>>(
     [
-      "listing_indexes?select=id,postal_code,latitude,longitude,travel_time_bus_ntu,travel_time_bus_nus,travel_time_bus_smu,travel_time_bus_sutd,commute_computed_at",
+      "listing_indexes?select=id",
       `postal_code=eq.${encodeURIComponent(postalCode)}`,
       `id=neq.${encodeURIComponent(listing.id)}`,
-      "commute_computed_at=not.is.null",
-      "order=commute_computed_at.desc.nullslast",
-      "limit=5"
+      "limit=20"
+    ].join("&")
+  );
+  const siblingIds = siblingListings.map((row) => row.id).filter(Boolean);
+  if (siblingIds.length === 0) return null;
+
+  const selectedSchoolCodes = schools.map((school) => school.school_code);
+  const rows = await supabaseRequestWithRetry<CommuteCacheRow[]>(
+    [
+      "listing_commute_cache?select=listing_index_id,school_code,mode,duration_minutes,computed_at",
+      `listing_index_id=in.(${siblingIds.join(",")})`,
+      `school_code=in.(${selectedSchoolCodes.join(",")})`,
+      `mode=eq.${BUS_MODE}`,
+      "status=eq.success",
+      "duration_minutes=not.is.null",
+      "order=computed_at.desc.nullslast"
     ].join("&")
   );
 
+  const travelTimes: Partial<Record<SchoolCode, number>> = {};
   for (const row of rows) {
-    const travelTimes: Record<string, number> = {};
-    for (const school of schools) {
-      const value = getCachedTravelTime(row, school.school_code);
-      if (typeof value === "number") {
-        travelTimes[COMMUTE_COLUMNS[school.school_code]] = value;
-      }
+    if (!selectedSchoolCodes.includes(row.school_code)) continue;
+    if (typeof row.duration_minutes !== "number") continue;
+    if (travelTimes[row.school_code] === undefined) {
+      travelTimes[row.school_code] = row.duration_minutes;
     }
-    if (Object.keys(travelTimes).length === schools.length) return travelTimes;
   }
 
-  return null;
-}
-
-function getCachedTravelTime(row: PostalCodeCacheRow, school: SchoolCode): number | null {
-  if (school === "NTU") return row.travel_time_bus_ntu;
-  if (school === "NUS") return row.travel_time_bus_nus;
-  if (school === "SMU") return row.travel_time_bus_smu;
-  return row.travel_time_bus_sutd;
+  return selectedSchoolCodes.every((code) => typeof travelTimes[code] === "number")
+    ? travelTimes as Record<SchoolCode, number>
+    : null;
 }
 
 async function geocodeOneMap(query: string, confidence: GeocodeSuccess["confidence"]) {
@@ -343,19 +348,19 @@ async function geocodeOneMap(query: string, confidence: GeocodeSuccess["confiden
 }
 
 async function computeRoutes(coords: { latitude: number; longitude: number }, schools: SchoolLocation[]) {
-  const travelTimes: Record<string, number> = {};
+  const travelTimes: Partial<Record<SchoolCode, number>> = {};
   const errors: string[] = [];
 
   for (const school of schools) {
     const result = await routeOneMap(coords, school);
     if (result.ok) {
-      travelTimes[COMMUTE_COLUMNS[school.school_code]] = result.minutes;
+      travelTimes[school.school_code] = result.minutes;
     } else {
       errors.push(`${school.school_code}: ${result.error}`);
     }
   }
 
-  return { travelTimes, errors };
+  return { travelTimes: travelTimes as Record<SchoolCode, number>, errors };
 }
 
 async function routeOneMap(start: { latitude: number; longitude: number }, school: SchoolLocation) {
@@ -410,19 +415,35 @@ async function updateListingCoordinates(listingIndexId: string, geocode: Geocode
 
 async function updateListingCommute(
   listingIndexId: string,
-  travelTimes: Record<string, number>,
+  travelTimes: Partial<Record<SchoolCode, number>>,
   dryRun: boolean,
   source: "onemap_route_pt" | "postal_code_cache"
 ): Promise<void> {
   if (dryRun) return;
-  await supabaseRequestWithRetry(`listing_indexes?id=eq.${encodeURIComponent(listingIndexId)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
-    body: JSON.stringify({
-      ...travelTimes,
-      commute_computed_at: new Date().toISOString(),
-      commute_source: source
-    })
+
+  const now = new Date().toISOString();
+  const rows = Object.entries(travelTimes)
+    .filter(([, minutes]) => typeof minutes === "number")
+    .map(([schoolCode, minutes]) => ({
+      listing_index_id: listingIndexId,
+      school_code: schoolCode,
+      mode: BUS_MODE,
+      duration_minutes: minutes,
+      provider: source,
+      status: "success",
+      computed_at: now,
+      updated_at: now
+    }));
+
+  if (rows.length === 0) return;
+
+  await supabaseRequestWithRetry("listing_commute_cache?on_conflict=listing_index_id,school_code,mode", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify(rows)
   });
 }
 
