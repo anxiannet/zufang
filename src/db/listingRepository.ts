@@ -17,6 +17,35 @@ type RawListingInput = {
   detail: RawDetailListing;
 };
 
+export async function touchListingLastSeen(listing: ListListing): Promise<void> {
+  const row = {
+    source: listing.source,
+    source_id: listing.sourceId,
+    listing_url: listing.detailUrl,
+    detail_url: listing.detailUrl,
+    list_title: listing.listTitle,
+    list_price: listing.listPrice,
+    list_contact: listing.listContact,
+    list_raw_html: listing.listRawHtml,
+    list_raw_text: listing.listRawText,
+    list_phone: listing.listPhone,
+    list_wechat: listing.listWechat,
+    list_posted_at: listing.listPostedAt?.toISOString() ?? null,
+    is_top: listing.isTop,
+    removed_from_source: false,
+    last_seen_at: new Date().toISOString()
+  };
+
+  await supabaseRequest(`${config.listingTableName}?on_conflict=source,source_id`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify(row)
+  });
+}
+
 export async function upsertRawListing(input: RawListingInput): Promise<SaveResult> {
   const existing = await findExistingListing(input.detail.source, input.detail.sourceId);
   const row = toRawListingRow(input);
@@ -103,8 +132,12 @@ function toRawListingRow(input: RawListingInput): Record<string, unknown> {
     list_contact: list.listContact,
     list_raw_html: list.listRawHtml,
     list_raw_text: list.listRawText,
+    list_phone: list.listPhone,
+    list_wechat: list.listWechat,
+    list_posted_at: list.listPostedAt?.toISOString() ?? null,
     raw_detail_html: detail.rawDetailHtml,
     scraped_at: detail.scrapedAt,
+    last_seen_at: new Date().toISOString(),
     is_top: list.isTop,
     removed_from_source: false
   };
