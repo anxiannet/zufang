@@ -5,16 +5,15 @@ type NtuListing = {
   price: number | null;
   mrt_area: string | null;
   postal_code: string | null;
+  address_text: string | null;
+  tags: string[] | null;
+  amenities: string[] | null;
   room_type: string | null;
   normalized_room_type: string | null;
   available_from: string | null;
   cooking_allowed: boolean | null;
-  can_register_address: boolean | null;
   gender_preference: string | null;
-  summary: string | null;
 };
-
-type CleanListingRow = Omit<NtuListing, "summary">;
 
 const ntuAreas = ["Boon Lay", "Pioneer", "Lakeside", "Jurong East", "Chinese Garden", "Clementi"];
 
@@ -28,7 +27,7 @@ const roomTypeLabels: Record<string, string> = {
   studio: "Studio"
 };
 
-function labelRoomType(listing: NtuListing | CleanListingRow) {
+function labelRoomType(listing: NtuListing) {
   const raw = listing.normalized_room_type || listing.room_type || "房间";
   return roomTypeLabels[raw] ?? raw;
 }
@@ -51,8 +50,39 @@ function labelGender(value: string | null) {
   return value;
 }
 
-function fallbackSummary(listing: NtuListing) {
-  return `位于${labelArea(listing.mrt_area)}的${labelRoomType(listing)}，邮编${listing.postal_code ?? "待确认"}，可作为了解 NTU 西部通勤圈房源的参考信息。`;
+function extractBlockNumber(listing: NtuListing) {
+  const text = `${listing.address_text ?? ""} ${listing.postal_code ?? ""}`;
+  const blockMatch = text.match(/(?:Blk|Block|大牌)\s*([0-9]{1,4}[A-Z]?)/i);
+  if (blockMatch?.[1]) return `大牌${blockMatch[1]}`;
+
+  const postalPrefix = listing.postal_code?.slice(0, 3);
+  if (postalPrefix && /^[0-9]{3}$/.test(postalPrefix)) return `大牌${postalPrefix}`;
+
+  return null;
+}
+
+function buildTitle(listing: NtuListing) {
+  const block = extractBlockNumber(listing);
+  return [labelArea(listing.mrt_area), block, labelRoomType(listing)].filter(Boolean).join(" · ");
+}
+
+function cleanTag(tag: string) {
+  return tag.replace(/电话|微信|WhatsApp|Telegram|联系|号码|屋主|房东/gi, "").trim();
+}
+
+function buildTags(listing: NtuListing) {
+  const baseTags = [
+    listing.cooking_allowed === true ? "可煮" : null,
+    labelGender(listing.gender_preference) !== "不限" ? labelGender(listing.gender_preference) : null,
+    labelRoomType(listing),
+    labelArea(listing.mrt_area).replace(" 区域", "")
+  ];
+
+  const dbTags = [...(listing.tags ?? []), ...(listing.amenities ?? [])]
+    .map((tag) => cleanTag(String(tag)))
+    .filter((tag) => tag && tag.length <= 12 && !/[0-9]{6,}/.test(tag));
+
+  return Array.from(new Set([...baseTags, ...dbTags].filter(Boolean) as string[])).slice(0, 8);
 }
 
 async function getNtuListings() {
@@ -61,7 +91,7 @@ async function getNtuListings() {
 
   const { data, error } = await supabase
     .from("listing_clean")
-    .select("id,price,mrt_area,postal_code,room_type,normalized_room_type,available_from,cooking_allowed,can_register_address,gender_preference")
+    .select("id,price,mrt_area,postal_code,address_text,tags,amenities,room_type,normalized_room_type,available_from,cooking_allowed,gender_preference")
     .not("postal_code", "is", null)
     .neq("postal_code", "")
     .or(orFilter)
@@ -73,41 +103,7 @@ async function getNtuListings() {
     return [];
   }
 
-  const cleanRows = (data ?? []) as CleanListingRow[];
-  const cleanIds = cleanRows.map((listing) => listing.id);
-  if (cleanIds.length === 0) return [];
-
-  const { data: indexRows } = await supabase
-    .from("listing_indexes")
-    .select("id,clean_listing_id")
-    .in("clean_listing_id", cleanIds);
-
-  const indexByCleanId = new Map<string, string>();
-  for (const row of indexRows ?? []) {
-    indexByCleanId.set(row.clean_listing_id, row.id);
-  }
-
-  const indexIds = [...indexByCleanId.values()];
-  const summaryByIndexId = new Map<string, string>();
-
-  if (indexIds.length > 0) {
-    const { data: aiRows } = await supabase
-      .from("listing_ai_analysis")
-      .select("listing_index_id,public_summary")
-      .in("listing_index_id", indexIds);
-
-    for (const row of aiRows ?? []) {
-      if (row.public_summary) summaryByIndexId.set(row.listing_index_id, row.public_summary);
-    }
-  }
-
-  return cleanRows.map((listing) => {
-    const indexId = indexByCleanId.get(listing.id);
-    return {
-      ...listing,
-      summary: indexId ? summaryByIndexId.get(indexId) ?? null : null
-    };
-  }) as NtuListing[];
+  return (data ?? []) as NtuListing[];
 }
 
 export default async function HomePage() {
@@ -167,7 +163,7 @@ export default async function HomePage() {
           {listings.map((listing) => (
             <article key={listing.id} className="card overflow-hidden p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <div className="mb-4 rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
-                <h2 className="text-xl font-bold text-ink">{labelArea(listing.mrt_area)} · {labelRoomType(listing)}</h2>
+                <h2 className="text-xl font-bold text-ink">{buildTitle(listing)}</h2>
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-sm text-ink">
@@ -178,12 +174,15 @@ export default async function HomePage() {
                 <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">入住：</span>{listing.available_from || "待确认"}</div>
                 <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">性别：</span>{labelGender(listing.gender_preference)}</div>
                 <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">可煮：</span>{labelBoolean(listing.cooking_allowed, "可", "不可")}</div>
-                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">报地址：</span>{labelBoolean(listing.can_register_address, "可", "待确认")}</div>
               </div>
 
-              <p className="mt-4 rounded-lg bg-teal-50 px-3 py-3 text-sm leading-6 text-muted">
-                {listing.summary || fallbackSummary(listing)}
-              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {buildTags(listing).map((tag) => (
+                  <span key={tag} className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-brand">
+                    {tag}
+                  </span>
+                ))}
+              </div>
             </article>
           ))}
         </section>
