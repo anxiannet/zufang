@@ -111,6 +111,14 @@ export default async function HomePage() {
         这些房源已优先筛选出有邮编、靠近 NTU 通勤圈的房源。后续会继续补充真实通勤时间、AI推荐理由和屋主认证。当前先以“能快速判断是否适合 NTU 学生”为目标。
       </section>
 
+      <section className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm leading-7 text-amber-900">
+        <h2 className="mb-2 font-semibold text-amber-950">平台声明</h2>
+        <p>本平台不参与房屋租赁交易。</p>
+        <p>本平台仅提供房源信息整理与推荐服务。</p>
+        <p>所有房源信息均来源于公开渠道。</p>
+        <p>用户需自行核实房东身份及房源真实性。</p>
+      </section>
+
       {listings.length === 0 ? (
         <section className="card p-8 text-center text-muted">暂时没有可展示的 NTU 房源。请检查 listing_clean 的 RLS 读取权限或房源状态。</section>
       ) : (
