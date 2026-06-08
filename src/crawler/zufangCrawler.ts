@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import { hasExistingRawDetail, markRemovedFromSource, upsertRawListing } from "../db/listingRepository";
+import { hasExistingRawDetail, markRemovedFromSource, touchListingLastSeen, upsertRawListing } from "../db/listingRepository";
 import { deletedListingKey, findDeletedListings } from "../db/deletedListingRepository";
 import { CrawlMode, CrawlStats, CrawlSummary, CrawlTargetSummary, ListListing } from "../models/listing";
 import { config, CrawlTarget } from "../utils/config";
@@ -210,6 +210,7 @@ async function crawlTargetInternal(target: CrawlTarget, options: Required<CrawlO
       }
 
       await saveRawListItem(listing);
+      await touchListingLastSeen(listing);
 
       if (listing.listPostedAt && isOlderThanDays(listing.listPostedAt, crawlDays) && !listing.isTop) {
         pageHadOldListings = true;
@@ -234,7 +235,7 @@ async function crawlTargetInternal(target: CrawlTarget, options: Required<CrawlO
 
       if (await hasExistingRawDetail(listing.source, listing.sourceId)) {
         stats.listingsSkipped += 1;
-        logger.skip("listing detail already crawled, skip update", {
+        logger.skip("listing detail already crawled, skip detail update", {
           page,
           source_id: listing.sourceId,
           detail_url: listing.detailUrl
