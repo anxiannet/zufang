@@ -79,33 +79,33 @@ async function getNtuListings() {
 
   const { data: indexRows } = await supabase
     .from("listing_indexes")
-    .select("id,clean_listing_id,summary")
+    .select("id,clean_listing_id")
     .in("clean_listing_id", cleanIds);
 
-  const indexByCleanId = new Map<string, { id: string; summary: string | null }>();
+  const indexByCleanId = new Map<string, string>();
   for (const row of indexRows ?? []) {
-    indexByCleanId.set(row.clean_listing_id, { id: row.id, summary: row.summary ?? null });
+    indexByCleanId.set(row.clean_listing_id, row.id);
   }
 
-  const indexIds = [...indexByCleanId.values()].map((row) => row.id);
+  const indexIds = [...indexByCleanId.values()];
   const summaryByIndexId = new Map<string, string>();
 
   if (indexIds.length > 0) {
     const { data: aiRows } = await supabase
       .from("listing_ai_analysis")
-      .select("listing_index_id,summary_ai")
+      .select("listing_index_id,public_summary")
       .in("listing_index_id", indexIds);
 
     for (const row of aiRows ?? []) {
-      if (row.summary_ai) summaryByIndexId.set(row.listing_index_id, row.summary_ai);
+      if (row.public_summary) summaryByIndexId.set(row.listing_index_id, row.public_summary);
     }
   }
 
   return cleanRows.map((listing) => {
-    const index = indexByCleanId.get(listing.id);
+    const indexId = indexByCleanId.get(listing.id);
     return {
       ...listing,
-      summary: index ? summaryByIndexId.get(index.id) ?? index.summary ?? null : null
+      summary: indexId ? summaryByIndexId.get(indexId) ?? null : null
     };
   }) as NtuListing[];
 }
