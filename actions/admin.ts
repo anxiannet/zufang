@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { enqueueMissingCommuteJobs } from "@/src/services/commuteEnrichmentQueue";
 import { processNewListings } from "@/src/services/listingPipeline";
+import { ensureOneMapTokenEnv, hasOneMapCredentials } from "@/src/services/oneMapToken";
 import { runCommuteEnrichment, SchoolCode } from "@/scripts/enrichCommute";
 
 export async function publishListing(listingId: string) {
@@ -381,7 +382,7 @@ export async function getCommuteDebugDashboard() {
     recentJobs: recentJobs.data ?? [],
     failedJobs: failedJobs.data ?? [],
     completedListings: completedListings.data ?? [],
-    hasOneMapToken: Boolean(process.env.ONEMAP_API_TOKEN || process.env.ONEMAP_TOKEN)
+    hasOneMapToken: hasOneMapCredentials()
   };
 }
 
@@ -420,9 +421,7 @@ export async function runAdminCommuteTask(formData: FormData) {
     }
 
     if (action === "run" || action === "dry_run") {
-      if (!process.env.ONEMAP_API_TOKEN && !process.env.ONEMAP_TOKEN) {
-        throw new Error("ONEMAP_API_TOKEN is required on the server to run commute enrichment.");
-      }
+      await ensureOneMapTokenEnv();
 
       const summary = await runCommuteEnrichment({
         limit,
