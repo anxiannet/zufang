@@ -4,6 +4,12 @@ export type SchoolCode = "NTU" | "NUS" | "SMU" | "SUTD";
 type JobStatus = "pending" | "retry" | "completed" | "failed";
 
 const BUS_MODE = "bus";
+const SCHOOL_CODES: SchoolCode[] = ["NTU", "NUS", "SMU", "SUTD"];
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+const DEFAULT_ROUTE_TIME = "08:30:00";
+const DEFAULT_ONEMAP_TIMEOUT_MS = 30_000;
+const SUPABASE_REQUEST_RETRIES = 3;
 
 type QueueRow = {
   id: string;
@@ -20,17 +26,6 @@ type QueueRow = {
 type ListingIndexRow = {
   id: string;
   postal_code: string | null;
-  address_text: string | null;
-  latitude: number | null;
-  longitude: number | null;
-};
-
-type ListingCoordinateCacheRow = {
-  id: string;
-  postal_code: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  commute_computed_at?: string | null;
 };
 
 type CommuteCacheRow = {
@@ -45,6 +40,11 @@ type GeocodingCacheRow = {
   postal_code: string;
   latitude: number | null;
   longitude: number | null;
+  building?: string | null;
+  block?: string | null;
+  road_name?: string | null;
+  address?: string | null;
+  status?: string | null;
 };
 
 type SchoolLocation = {
@@ -57,6 +57,7 @@ type OneMapSearchResult = {
   SEARCHVAL?: string;
   BLK_NO?: string;
   ROAD_NAME?: string;
+  BUILDING?: string;
   ADDRESS?: string;
   POSTAL?: string;
   LATITUDE?: string;
@@ -64,9 +65,10 @@ type OneMapSearchResult = {
 };
 
 type GeocodeSuccess = {
+  postal_code: string;
   latitude: number;
   longitude: number;
-  source: "onemap_search" | "listing_indexes_postal_code_cache" | "geocoding_cache";
+  source: "onemap_search" | "geocoding_cache";
   confidence: "postal_code" | "address_text" | "postal_code_cache";
   raw_result?: OneMapSearchResult;
 };
@@ -86,13 +88,6 @@ export type RunCommuteEnrichmentSummary = {
   dry_run: boolean;
   school: SchoolCode | "ALL";
 };
-
-const SCHOOL_CODES: SchoolCode[] = ["NTU", "NUS", "SMU", "SUTD"];
-const DEFAULT_LIMIT = 20;
-const MAX_LIMIT = 100;
-const DEFAULT_ROUTE_TIME = "08:30:00";
-const DEFAULT_ONEMAP_TIMEOUT_MS = 30_000;
-const SUPABASE_REQUEST_RETRIES = 3;
 
 export async function runCommuteEnrichment(optionsInput: RunCommuteEnrichmentOptions = {}): Promise<RunCommuteEnrichmentSummary> {
   const options = {
@@ -162,11 +157,6 @@ export async function runCommuteEnrichment(optionsInput: RunCommuteEnrichmentOpt
   return summary;
 }
 
-async function main() {
-  const summary = await runCommuteEnrichment(parseArgs(process.argv.slice(2)));
-  if (summary.failed_count > 0) process.exitCode = 1;
-}
-
 async function fetchPendingJobs(limit: number): Promise<QueueRow[]> {
   const params = new URLSearchParams({
     select: "id,listing_index_id,postal_code,address_text,status,retry_count,last_error,created_at,updated_at,title,source,source_id",
@@ -184,7 +174,7 @@ async function countPendingJobs(): Promise<number> {
 
 async function fetchListing(id: string): Promise<ListingIndexRow | null> {
   const rows = await supabaseRequestWithRetry<ListingIndexRow[]>(
-    `listing_indexes?select=id,postal_code,address_text,latitude,longitude&id=eq.${encodeURIComponent(id)}&limit=1`
+    `listing_indexes?select=id,postal_code&id=eq.${encodeURIComponent(id)}&limit=1`
   );
   return rows[0] ?? null;
 }
@@ -201,24 +191,15 @@ async function fetchSchools(school?: SchoolCode): Promise<SchoolLocation[]> {
 }
 
 async function ensureCoordinates(job: QueueRow, listing: ListingIndexRow, dryRun: boolean) {
-  if (isFiniteCoordinate(listing.latitude) && isFiniteCoordinate(listing.longitude)) {
-    return { latitude: listing.latitude, longitude: listing.longitude };
-  }
-
   const postalCode = cleanPostalCode(job.postal_code ?? listing.postal_code);
   if (postalCode) {
-    const cached = await fetchCachedCoordinates(postalCode, listing.id);
-    if (cached) {
-      if (!dryRun) {
-        await updateListingCoordinates(job.listing_index_id, cached);
-      }
-      return { latitude: cached.latitude, longitude: cached.longitude };
-    }
+    const cached = await fetchCachedCoordinates(postalCode);
+    if (cached) return { latitude: cached.latitude, longitude: cached.longitude };
   }
 
-  const query = postalCode ?? cleanSearchQuery(job.address_text ?? listing.address_text);
+  const query = postalCode ?? cleanSearchQuery(job.address_text);
   if (!query) {
-    await markJob(job, "failed", "Missing postal_code and address_text for geocoding", dryRun);
+    await markJob(job, "failed", "Missing postal_code for geocoding", dryRun);
     return null;
   }
 
@@ -228,48 +209,24 @@ async function ensureCoordinates(job: QueueRow, listing: ListingIndexRow, dryRun
     return null;
   }
 
-  if (!dryRun) {
-    await updateListingCoordinates(job.listing_index_id, geocode.value);
-  }
-
+  if (!dryRun) await upsertGeocodingCache(geocode.value);
   return { latitude: geocode.value.latitude, longitude: geocode.value.longitude };
 }
 
-async function fetchCachedCoordinates(postalCode: string, listingIndexId: string): Promise<GeocodeSuccess | null> {
-  const listingRows = await supabaseRequestWithRetry<ListingCoordinateCacheRow[]>(
-    [
-      "listing_indexes?select=id,postal_code,latitude,longitude,commute_computed_at",
-      `postal_code=eq.${encodeURIComponent(postalCode)}`,
-      `id=neq.${encodeURIComponent(listingIndexId)}`,
-      "latitude=not.is.null",
-      "longitude=not.is.null",
-      "order=geocoded_at.desc.nullslast",
-      "limit=1"
-    ].join("&")
+async function fetchCachedCoordinates(postalCode: string): Promise<GeocodeSuccess | null> {
+  const rows = await supabaseRequestWithRetry<GeocodingCacheRow[]>(
+    `geocoding_cache?select=postal_code,latitude,longitude,building,block,road_name,address,status&postal_code=eq.${encodeURIComponent(postalCode)}&status=eq.success&latitude=not.is.null&longitude=not.is.null&limit=1`
   );
-  const listingCache = listingRows[0];
-  if (isFiniteCoordinate(listingCache?.latitude) && isFiniteCoordinate(listingCache?.longitude)) {
+  const cached = rows[0];
+  if (isFiniteCoordinate(cached?.latitude) && isFiniteCoordinate(cached?.longitude)) {
     return {
-      latitude: listingCache.latitude,
-      longitude: listingCache.longitude,
-      source: "listing_indexes_postal_code_cache",
-      confidence: "postal_code_cache"
-    };
-  }
-
-  const geocodingRows = await supabaseRequestWithRetry<GeocodingCacheRow[]>(
-    `geocoding_cache?select=postal_code,latitude,longitude&postal_code=eq.${encodeURIComponent(postalCode)}&status=eq.success&latitude=not.is.null&longitude=not.is.null&limit=1`
-  );
-  const geocodingCache = geocodingRows[0];
-  if (isFiniteCoordinate(geocodingCache?.latitude) && isFiniteCoordinate(geocodingCache?.longitude)) {
-    return {
-      latitude: geocodingCache.latitude,
-      longitude: geocodingCache.longitude,
+      postal_code: postalCode,
+      latitude: cached.latitude,
+      longitude: cached.longitude,
       source: "geocoding_cache",
       confidence: "postal_code_cache"
     };
   }
-
   return null;
 }
 
@@ -305,9 +262,7 @@ async function fetchCachedTravelTimes(job: QueueRow, listing: ListingIndexRow, s
   for (const row of rows) {
     if (!selectedSchoolCodes.includes(row.school_code)) continue;
     if (typeof row.duration_minutes !== "number") continue;
-    if (travelTimes[row.school_code] === undefined) {
-      travelTimes[row.school_code] = row.duration_minutes;
-    }
+    if (travelTimes[row.school_code] === undefined) travelTimes[row.school_code] = row.duration_minutes;
   }
 
   return selectedSchoolCodes.every((code) => typeof travelTimes[code] === "number")
@@ -324,9 +279,7 @@ async function geocodeOneMap(query: string, confidence: GeocodeSuccess["confiden
 
   const response = await fetchWithTimeout(endpoint, { headers: oneMapHeaders() });
   if (response.status === 429) return { ok: false as const, retryable: true, error: "OneMap Search HTTP 429 rate limited" };
-  if (response.status === 401 || response.status === 403) {
-    return { ok: false as const, retryable: true, error: `OneMap Search HTTP ${response.status}: check ONEMAP_API_TOKEN` };
-  }
+  if (response.status === 401 || response.status === 403) return { ok: false as const, retryable: true, error: `OneMap Search HTTP ${response.status}: check ONEMAP_API_TOKEN` };
   if (!response.ok) return { ok: false as const, retryable: true, error: `OneMap Search HTTP ${response.status}` };
 
   const payload = await response.json();
@@ -337,29 +290,48 @@ async function geocodeOneMap(query: string, confidence: GeocodeSuccess["confiden
 
   const latitude = Number(result.LATITUDE);
   const longitude = Number(result.LONGITUDE);
-  if (!isFiniteCoordinate(latitude) || !isFiniteCoordinate(longitude)) {
-    return { ok: false as const, retryable: true, error: "OneMap Search result missing coordinates" };
-  }
+  const postalCode = cleanPostalCode(result.POSTAL ?? query);
+  if (!postalCode) return { ok: false as const, retryable: false, error: "OneMap Search result missing postal code" };
+  if (!isFiniteCoordinate(latitude) || !isFiniteCoordinate(longitude)) return { ok: false as const, retryable: true, error: "OneMap Search result missing coordinates" };
 
   return {
     ok: true as const,
-    value: { latitude, longitude, source: "onemap_search" as const, confidence, raw_result: result }
+    value: { postal_code: postalCode, latitude, longitude, source: "onemap_search" as const, confidence, raw_result: result }
   };
+}
+
+async function upsertGeocodingCache(geocode: GeocodeSuccess): Promise<void> {
+  const raw = geocode.raw_result;
+  const now = new Date().toISOString();
+  await supabaseRequestWithRetry("geocoding_cache?on_conflict=postal_code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      postal_code: geocode.postal_code,
+      latitude: geocode.latitude,
+      longitude: geocode.longitude,
+      building: raw?.BUILDING ?? raw?.SEARCHVAL ?? null,
+      block: raw?.BLK_NO ?? null,
+      road_name: raw?.ROAD_NAME ?? null,
+      address: raw?.ADDRESS ?? null,
+      provider: geocode.source,
+      status: "success",
+      error_message: null,
+      raw_response: raw ?? null,
+      geocoded_at: now,
+      updated_at: now
+    })
+  });
 }
 
 async function computeRoutes(coords: { latitude: number; longitude: number }, schools: SchoolLocation[]) {
   const travelTimes: Partial<Record<SchoolCode, number>> = {};
   const errors: string[] = [];
-
   for (const school of schools) {
     const result = await routeOneMap(coords, school);
-    if (result.ok) {
-      travelTimes[school.school_code] = result.minutes;
-    } else {
-      errors.push(`${school.school_code}: ${result.error}`);
-    }
+    if (result.ok) travelTimes[school.school_code] = result.minutes;
+    else errors.push(`${school.school_code}: ${result.error}`);
   }
-
   return { travelTimes: travelTimes as Record<SchoolCode, number>, errors };
 }
 
@@ -375,17 +347,12 @@ async function routeOneMap(start: { latitude: number; longitude: number }, schoo
 
   const response = await fetchWithTimeout(endpoint, { headers: oneMapHeaders() });
   if (response.status === 429) return { ok: false as const, error: "OneMap Route HTTP 429 rate limited" };
-  if (response.status === 401 || response.status === 403) {
-    return { ok: false as const, error: `OneMap Route HTTP ${response.status}: check ONEMAP_API_TOKEN` };
-  }
+  if (response.status === 401 || response.status === 403) return { ok: false as const, error: `OneMap Route HTTP ${response.status}: check ONEMAP_API_TOKEN` };
   if (!response.ok) return { ok: false as const, error: `OneMap Route HTTP ${response.status}` };
 
   const payload = await response.json();
   const seconds = extractRouteSeconds(payload);
-  if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) {
-    return { ok: false as const, error: "OneMap Route response missing total time" };
-  }
-
+  if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return { ok: false as const, error: "OneMap Route response missing total time" };
   return { ok: true as const, minutes: Math.max(1, Math.round(seconds / 60)) };
 }
 
@@ -393,205 +360,81 @@ function extractRouteSeconds(payload: unknown): number | null {
   const record = payload as Record<string, any>;
   const direct = Number(record?.route_summary?.total_time ?? record?.route_summary?.totalTime ?? record?.total_time);
   if (Number.isFinite(direct)) return direct;
-
   const itinerary = record?.plan?.itineraries?.[0] ?? record?.itineraries?.[0];
   const duration = Number(itinerary?.duration ?? itinerary?.totalTime ?? itinerary?.time);
   return Number.isFinite(duration) ? duration : null;
 }
 
-async function updateListingCoordinates(listingIndexId: string, geocode: GeocodeSuccess): Promise<void> {
-  await supabaseRequestWithRetry(`listing_indexes?id=eq.${encodeURIComponent(listingIndexId)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
-    body: JSON.stringify({
-      latitude: geocode.latitude,
-      longitude: geocode.longitude,
-      geocoded_at: new Date().toISOString(),
-      geocode_source: geocode.source,
-      geocode_confidence: geocode.confidence
-    })
-  });
-}
-
-async function updateListingCommute(
-  listingIndexId: string,
-  travelTimes: Partial<Record<SchoolCode, number>>,
-  dryRun: boolean,
-  source: "onemap_route_pt" | "postal_code_cache"
-): Promise<void> {
+async function updateListingCommute(listingIndexId: string, travelTimes: Partial<Record<SchoolCode, number>>, dryRun: boolean, source: "onemap_route_pt" | "postal_code_cache"): Promise<void> {
   if (dryRun) return;
-
   const now = new Date().toISOString();
   const rows = Object.entries(travelTimes)
     .filter(([, minutes]) => typeof minutes === "number")
-    .map(([schoolCode, minutes]) => ({
-      listing_index_id: listingIndexId,
-      school_code: schoolCode,
-      mode: BUS_MODE,
-      duration_minutes: minutes,
-      provider: source,
-      status: "success",
-      computed_at: now,
-      updated_at: now
-    }));
-
+    .map(([schoolCode, minutes]) => ({ listing_index_id: listingIndexId, school_code: schoolCode, mode: BUS_MODE, duration_minutes: minutes, provider: source, status: "success", computed_at: now, updated_at: now }));
   if (rows.length === 0) return;
-
   await supabaseRequestWithRetry("listing_commute_cache?on_conflict=listing_index_id,school_code,mode", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal"
-    },
+    headers: { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
     body: JSON.stringify(rows)
   });
 }
 
 async function markJob(job: QueueRow, status: JobStatus, lastError: string | null, dryRun: boolean): Promise<void> {
-  if (dryRun) {
-    if (lastError) {
-      console.warn("Dry-run job status update", {
-        job_id: job.id,
-        listing_index_id: job.listing_index_id,
-        status,
-        last_error: lastError
-      });
-    }
-    return;
-  }
+  if (dryRun) return;
   await supabaseRequestWithRetry(`commute_enrichment_jobs?id=eq.${encodeURIComponent(job.id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
-    body: JSON.stringify({
-      status,
-      retry_count: status === "retry" ? Number(job.retry_count ?? 0) + 1 : Number(job.retry_count ?? 0),
-      last_error: lastError,
-      updated_at: new Date().toISOString()
-    })
+    body: JSON.stringify({ status, retry_count: status === "retry" ? Number(job.retry_count ?? 0) + 1 : Number(job.retry_count ?? 0), last_error: lastError, updated_at: new Date().toISOString() })
   });
 }
 
 async function supabaseRequestWithRetry<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   let lastError: unknown;
-
   for (let attempt = 1; attempt <= SUPABASE_REQUEST_RETRIES; attempt += 1) {
-    try {
-      return await supabaseRequest<T>(path, init);
-    } catch (error) {
+    try { return await supabaseRequest<T>(path, init); }
+    catch (error) {
       lastError = error;
       if (attempt === SUPABASE_REQUEST_RETRIES || !isRetryableSupabaseError(error)) break;
       await sleep(500 * attempt);
     }
   }
-
   throw lastError;
 }
 
 function isRetryableSupabaseError(error: unknown): boolean {
   const message = errorMessage(error).toLowerCase();
-  return message.includes("fetch failed")
-    || message.includes("timeout")
-    || message.includes("econnreset")
-    || message.includes("enotfound")
-    || message.includes("503")
-    || message.includes("504");
+  return message.includes("fetch failed") || message.includes("timeout") || message.includes("econnreset") || message.includes("enotfound") || message.includes("503") || message.includes("504");
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
+function sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function oneMapHeaders(): HeadersInit {
   const token = process.env.ONEMAP_API_TOKEN ?? process.env.ONEMAP_TOKEN;
-  return {
-    Accept: "application/json",
-    ...(token ? { Authorization: token } : {}),
-    "User-Agent": "sg-chinese-rental-mvp/1.0"
-  };
+  return { Accept: "application/json", ...(token ? { Authorization: token } : {}), "User-Agent": "sg-chinese-rental-mvp/1.0" };
 }
-
 async function fetchWithTimeout(input: URL, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const timeoutMs = clampTimeout(process.env.ONEMAP_TIMEOUT_MS);
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`OneMap request timed out after ${timeoutMs}ms`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+  try { return await fetch(input, { ...init, signal: controller.signal }); }
+  catch (error) { if (error instanceof Error && error.name === "AbortError") throw new Error(`OneMap request timed out after ${timeoutMs}ms`); throw error; }
+  finally { clearTimeout(timeout); }
 }
+function clampTimeout(value: string | undefined): number { const parsed = Number.parseInt(String(value ?? ""), 10); return !Number.isFinite(parsed) || parsed <= 0 ? DEFAULT_ONEMAP_TIMEOUT_MS : Math.min(Math.max(parsed, 5_000), 120_000); }
+function routeDate(): string { const date = new Date(Date.now() + 24 * 60 * 60 * 1000); return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}-${date.getFullYear()}`; }
+function parseArgs(args: string[]) { let limit = DEFAULT_LIMIT; let dryRun = false; let school: SchoolCode | undefined; for (let index = 0; index < args.length; index += 1) { const arg = args[index]; if (arg === "--dry-run") dryRun = true; if (arg === "--limit") limit = clampLimit(args[index + 1]); if (arg.startsWith("--limit=")) limit = clampLimit(arg.slice("--limit=".length)); if (arg === "--school") school = parseSchool(args[index + 1]); if (arg.startsWith("--school=")) school = parseSchool(arg.slice("--school=".length)); } return { limit, dryRun, school }; }
+function parseSchool(value: string | undefined): SchoolCode { const school = String(value ?? "").trim().toUpperCase(); if (!SCHOOL_CODES.includes(school as SchoolCode)) throw new Error(`--school must be one of ${SCHOOL_CODES.join(", ")}`); return school as SchoolCode; }
+function clampLimit(value: string | undefined): number { const parsed = Number.parseInt(String(value ?? ""), 10); return !Number.isFinite(parsed) || parsed <= 0 ? DEFAULT_LIMIT : Math.min(parsed, MAX_LIMIT); }
+function cleanSearchQuery(value: string | null | undefined): string | null { const cleaned = String(value ?? "").trim(); return cleaned || null; }
+function cleanPostalCode(value: string | null | undefined): string | null { const cleaned = String(value ?? "").trim(); return /^\d{6}$/.test(cleaned) ? cleaned : null; }
+function isFiniteCoordinate(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
+function pad2(value: number): string { return String(value).padStart(2, "0"); }
+function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
-function clampTimeout(value: string | undefined): number {
-  const parsed = Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_ONEMAP_TIMEOUT_MS;
-  return Math.min(Math.max(parsed, 5_000), 120_000);
-}
-
-function routeDate(): string {
-  const date = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}-${date.getFullYear()}`;
-}
-
-function parseArgs(args: string[]) {
-  let limit = DEFAULT_LIMIT;
-  let dryRun = false;
-  let school: SchoolCode | undefined;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === "--dry-run") dryRun = true;
-    if (arg === "--limit") limit = clampLimit(args[index + 1]);
-    if (arg.startsWith("--limit=")) limit = clampLimit(arg.slice("--limit=".length));
-    if (arg === "--school") school = parseSchool(args[index + 1]);
-    if (arg.startsWith("--school=")) school = parseSchool(arg.slice("--school=".length));
-  }
-
-  return { limit, dryRun, school };
-}
-
-function parseSchool(value: string | undefined): SchoolCode {
-  const school = String(value ?? "").trim().toUpperCase();
-  if (!SCHOOL_CODES.includes(school as SchoolCode)) throw new Error(`--school must be one of ${SCHOOL_CODES.join(", ")}`);
-  return school as SchoolCode;
-}
-
-function clampLimit(value: string | undefined): number {
-  const parsed = Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_LIMIT;
-  return Math.min(parsed, MAX_LIMIT);
-}
-
-function cleanSearchQuery(value: string | null | undefined): string | null {
-  const cleaned = String(value ?? "").trim();
-  return cleaned || null;
-}
-
-function cleanPostalCode(value: string | null | undefined): string | null {
-  const cleaned = String(value ?? "").trim();
-  return /^\d{6}$/.test(cleaned) ? cleaned : null;
-}
-
-function isFiniteCoordinate(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+async function main() {
+  const summary = await runCommuteEnrichment(parseArgs(process.argv.slice(2)));
+  if (summary.failed_count > 0) process.exitCode = 1;
 }
 
 if (process.argv[1]?.endsWith("enrichCommute.ts")) {
-  main().catch((error) => {
-    console.error("Failed to enrich commute data", error);
-    process.exit(1);
-  });
+  main().catch((error) => { console.error("Failed to enrich commute data", error); process.exit(1); });
 }
