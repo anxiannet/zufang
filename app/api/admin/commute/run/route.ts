@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { requireRole } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { runCommuteEnrichment, type SchoolCode } from "@/scripts/enrichCommute";
+import { enqueueMissingCommuteJobs } from "@/src/services/commuteEnrichmentQueue";
 import { ensureOneMapTokenEnv } from "@/src/services/oneMapToken";
 
 export const runtime = "nodejs";
@@ -12,12 +15,15 @@ const SCHOOL_CODES: SchoolCode[] = ["NTU", "NUS", "SMU", "SUTD"];
 let isRunning = false;
 
 export async function POST(request: Request) {
-  const unauthorized = authorizeAdminRequest(request);
-  if (unauthorized) return unauthorized;
+  try {
+    await requireRole(["admin"]);
+  } catch {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
 
   if (isRunning) {
     return NextResponse.json(
-      { success: false, error: "Commute enrichment is already running. Please wait for the current run to finish." },
+      { success: false, error: "Commute task is already running. Please wait for the current run to finish." },
       { status: 409 }
     );
   }
@@ -27,19 +33,43 @@ export async function POST(request: Request) {
 
   try {
     const body = await readJsonBody(request);
+    const action = String(body?.action ?? "run");
     const limit = parseLimit(body?.limit);
     const school = parseSchool(body?.school);
-    const dryRun = body?.dryRun === true;
 
-    await ensureOneMapTokenEnv();
-    const result = await runCommuteEnrichment({ limit, school, dryRun });
+    if (action === "enqueue_missing") {
+      const result = await enqueueMissingCommuteJobs(limit);
+      return successResponse(startedAt, action, result);
+    }
 
-    return NextResponse.json({
-      success: true,
-      started_at: startedAt.toISOString(),
-      finished_at: new Date().toISOString(),
-      result
-    });
+    if (action === "retry_failed") {
+      const adminSupabase = createAdminClient();
+      const { data, error } = await adminSupabase
+        .from("commute_enrichment_jobs")
+        .update({
+          status: "pending",
+          retry_count: 0,
+          last_error: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq("status", "failed")
+        .select("id");
+
+      if (error) throw new Error(error.message);
+      return successResponse(startedAt, action, { enqueued: data?.length ?? 0 });
+    }
+
+    if (action === "run" || action === "dry_run") {
+      await ensureOneMapTokenEnv();
+      const result = await runCommuteEnrichment({
+        limit,
+        school,
+        dryRun: action === "dry_run"
+      });
+      return successResponse(startedAt, action, result);
+    }
+
+    throw new Error(`Unsupported commute action: ${action}`);
   } catch (error) {
     return NextResponse.json(
       {
@@ -55,16 +85,14 @@ export async function POST(request: Request) {
   }
 }
 
-function authorizeAdminRequest(request: Request): NextResponse | null {
-  const secret = process.env.ADMIN_JOB_SECRET;
-  if (!secret) {
-    return NextResponse.json({ success: false, error: "ADMIN_JOB_SECRET is not configured" }, { status: 500 });
-  }
-
-  const headerSecret = request.headers.get("x-admin-job-secret");
-  if (headerSecret === secret) return null;
-
-  return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+function successResponse(startedAt: Date, action: string, result: unknown) {
+  return NextResponse.json({
+    success: true,
+    action,
+    started_at: startedAt.toISOString(),
+    finished_at: new Date().toISOString(),
+    result
+  });
 }
 
 async function readJsonBody(request: Request): Promise<Record<string, unknown> | null> {
