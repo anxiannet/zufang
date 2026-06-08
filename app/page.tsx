@@ -5,7 +5,7 @@ type NtuListing = {
   price: number | null;
   mrt_area: string | null;
   postal_code: string | null;
-  address_text: string | null;
+  geocode_block: string | null;
   tags: string[] | null;
   amenities: string[] | null;
   room_type: string | null;
@@ -14,6 +14,8 @@ type NtuListing = {
   cooking_allowed: boolean | null;
   gender_preference: string | null;
 };
+
+type CleanListingRow = Omit<NtuListing, "geocode_block">;
 
 const ntuAreas = ["Boon Lay", "Pioneer", "Lakeside", "Jurong East", "Chinese Garden", "Clementi"];
 
@@ -45,13 +47,8 @@ function labelGender(value: string | null) {
 }
 
 function extractBlockNumber(listing: NtuListing) {
-  const text = `${listing.address_text ?? ""} ${listing.postal_code ?? ""}`;
-  const blockMatch = text.match(/(?:Blk|Block|大牌)\s*([0-9]{1,4}[A-Z]?)/i);
-  if (blockMatch?.[1]) return `大牌${blockMatch[1]}`;
-
-  const postalPrefix = listing.postal_code?.slice(0, 3);
-  if (postalPrefix && /^[0-9]{3}$/.test(postalPrefix)) return `大牌${postalPrefix}`;
-
+  const block = String(listing.geocode_block ?? "").trim();
+  if (block) return `大牌${block}`;
   return null;
 }
 
@@ -85,7 +82,7 @@ async function getNtuListings() {
 
   const { data, error } = await supabase
     .from("listing_clean")
-    .select("id,price,mrt_area,postal_code,address_text,tags,amenities,room_type,normalized_room_type,available_from,cooking_allowed,gender_preference")
+    .select("id,price,mrt_area,postal_code,tags,amenities,room_type,normalized_room_type,available_from,cooking_allowed,gender_preference")
     .not("postal_code", "is", null)
     .neq("postal_code", "")
     .or(orFilter)
@@ -97,7 +94,26 @@ async function getNtuListings() {
     return [];
   }
 
-  return (data ?? []) as NtuListing[];
+  const cleanRows = (data ?? []) as CleanListingRow[];
+  const postalCodes = Array.from(new Set(cleanRows.map((listing) => listing.postal_code).filter(Boolean) as string[]));
+  const blockByPostalCode = new Map<string, string>();
+
+  if (postalCodes.length > 0) {
+    const { data: geocodingRows } = await supabase
+      .from("geocoding_cache")
+      .select("postal_code,block")
+      .in("postal_code", postalCodes)
+      .eq("status", "success");
+
+    for (const row of geocodingRows ?? []) {
+      if (row.postal_code && row.block) blockByPostalCode.set(row.postal_code, row.block);
+    }
+  }
+
+  return cleanRows.map((listing) => ({
+    ...listing,
+    geocode_block: listing.postal_code ? blockByPostalCode.get(listing.postal_code) ?? null : null
+  })) as NtuListing[];
 }
 
 export default async function HomePage() {
