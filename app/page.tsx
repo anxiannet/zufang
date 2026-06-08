@@ -32,12 +32,6 @@ function labelRoomType(listing: NtuListing) {
   return roomTypeLabels[raw] ?? raw;
 }
 
-function labelBoolean(value: boolean | null, positive: string, negative: string, unknown = "待确认") {
-  if (value === true) return positive;
-  if (value === false) return negative;
-  return unknown;
-}
-
 function labelArea(area: string | null) {
   if (!area) return "NTU西部区域";
   return `${area.split(",")[0].trim()} 区域`;
@@ -162,18 +156,11 @@ export default async function HomePage() {
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {listings.map((listing) => (
             <article key={listing.id} className="card overflow-hidden p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-              <div className="mb-4 rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
+              <div className="rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
                 <h2 className="text-xl font-bold text-ink">{buildTitle(listing)}</h2>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-sm text-ink">
-                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">房型：</span>{labelRoomType(listing)}</div>
-                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">租金：</span>{listing.price ? `$${listing.price}` : "询价"}</div>
-                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">区域：</span>{labelArea(listing.mrt_area)}</div>
-                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">邮编：</span>{listing.postal_code}</div>
-                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">入住：</span>{listing.available_from || "待确认"}</div>
-                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">性别：</span>{labelGender(listing.gender_preference)}</div>
-                <div className="rounded bg-gray-50 px-3 py-2"><span className="text-muted">可煮：</span>{labelBoolean(listing.cooking_allowed, "可", "不可")}</div>
+                <div className="mt-3 text-2xl font-bold text-brand">
+                  {listing.price ? `$${listing.price}` : "询价"}<span className="text-sm font-medium text-muted"> / 月</span>
+                </div>
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
