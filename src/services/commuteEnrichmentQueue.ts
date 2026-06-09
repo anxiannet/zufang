@@ -19,6 +19,10 @@ type CommuteJobRow = {
   status: string;
 };
 
+type CommuteCacheRow = {
+  listing_index_id: string;
+};
+
 export type CommuteQueueSummary = {
   scanned: number;
   enqueued: number;
@@ -27,12 +31,18 @@ export type CommuteQueueSummary = {
 };
 
 const POSTAL_CODE_PATTERN = /^\d{6}$/;
+const NTU_SCHOOL_CODE = "NTU";
+const BUS_MODE = "bus";
 
 export async function enqueueCommuteJobForListingIndex(row: NormalizedListingIndexQueueInput): Promise<"enqueued" | "skipped"> {
   if (row.status && row.status !== "active") return "skipped";
 
   const postal = String(row.postal_code ?? "").trim();
   if (!POSTAL_CODE_PATTERN.test(postal)) return "skipped";
+
+  if (await hasExistingNtuBusCache(row.id)) {
+    return "skipped";
+  }
 
   const existingRows = await supabaseRequest<CommuteJobRow[]>(
     `commute_enrichment_jobs?select=id,listing_index_id,postal_code,status&listing_index_id=eq.${encodeURIComponent(row.id)}&limit=1`
@@ -65,9 +75,10 @@ export async function enqueueCommuteJobForListingIndex(row: NormalizedListingInd
 export async function enqueueMissingCommuteJobs(limit = 100): Promise<CommuteQueueSummary> {
   const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 500);
   const rows = await supabaseRequest<ListingIndexQueueInput[]>(
-    `listing_indexes?select=id,postal_code,status&status=eq.active&postal_code=not.is.null&travel_time_bus_ntu=is.null&order=indexed_at.desc.nullsfirst&limit=${safeLimit}`
+    `listing_indexes?select=id,postal_code,status&status=eq.active&postal_code=not.is.null&order=indexed_at.desc.nullsfirst&limit=${safeLimit}`
   );
 
+  const cachedListingIds = await fetchCachedNtuBusListingIds(rows.map((row) => row.id));
   const summary: CommuteQueueSummary = {
     scanned: rows.length,
     enqueued: 0,
@@ -77,6 +88,11 @@ export async function enqueueMissingCommuteJobs(limit = 100): Promise<CommuteQue
 
   for (const row of rows) {
     try {
+      if (cachedListingIds.has(row.id)) {
+        summary.skipped += 1;
+        continue;
+      }
+
       const normalizedRow = normalizeListingIndexQueueInput(row);
       if (!normalizedRow) {
         summary.skipped += 1;
@@ -107,4 +123,24 @@ function normalizeListingIndexQueueInput(row: ListingIndexQueueInput): Normalize
     postal_code: postal,
     status: row.status
   };
+}
+
+async function hasExistingNtuBusCache(listingIndexId: string): Promise<boolean> {
+  const rows = await supabaseRequest<CommuteCacheRow[]>(
+    `listing_commute_cache?select=listing_index_id&listing_index_id=eq.${encodeURIComponent(listingIndexId)}&school_code=eq.${NTU_SCHOOL_CODE}&mode=eq.${BUS_MODE}&duration_minutes=not.is.null&limit=1`
+  );
+
+  return rows.length > 0;
+}
+
+async function fetchCachedNtuBusListingIds(listingIndexIds: string[]): Promise<Set<string>> {
+  if (listingIndexIds.length === 0) return new Set();
+
+  const uniqueIds = [...new Set(listingIndexIds)];
+  const ids = uniqueIds.map((id) => `"${id}"`).join(",");
+  const rows = await supabaseRequest<CommuteCacheRow[]>(
+    `listing_commute_cache?select=listing_index_id&listing_index_id=in.(${ids})&school_code=eq.${NTU_SCHOOL_CODE}&mode=eq.${BUS_MODE}&duration_minutes=not.is.null`
+  );
+
+  return new Set(rows.map((row) => row.listing_index_id));
 }
