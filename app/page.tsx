@@ -2,12 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 
 type NtuListing = {
   id: string;
-  clean_listing_id: string | null;
   price: number | null;
   postal_code: string | null;
   display_address: string | null;
   commute_minutes: number | null;
-  source_text: string | null;
+  clean_text: string | null;
   tags: string[] | null;
   amenities: string[] | null;
   room_type: string | null;
@@ -37,13 +36,8 @@ type IndexRow = {
 
 type CleanRow = {
   id: string;
-  ingestion_listing_id: string | null;
   available_from: string | null;
-};
-
-type IngestionRow = {
-  id: string;
-  list_raw_text: string | null;
+  clean_text: string | null;
 };
 
 const quickAreas = ["≤30分钟", "31-45分钟", "46-60分钟"];
@@ -74,10 +68,6 @@ function buildTitle(listing: NtuListing) {
   return [listing.display_address || listing.postal_code || "地址待确认", labelRoomType(listing)].filter(Boolean).join(" · ");
 }
 
-function cleanTag(tag: string) {
-  return tag.trim();
-}
-
 function buildTags(listing: NtuListing) {
   const commuteTag = listing.commute_minutes ? `到NTU约${listing.commute_minutes}分钟` : null;
   const baseTags = [
@@ -88,7 +78,7 @@ function buildTags(listing: NtuListing) {
   ];
 
   const dbTags = [...(listing.tags ?? []), ...(listing.amenities ?? [])]
-    .map((tag) => cleanTag(String(tag)))
+    .map((tag) => String(tag).trim())
     .filter((tag) => tag && tag.length <= 12 && !/[0-9]{6,}/.test(tag));
 
   return Array.from(new Set([...baseTags, ...dbTags].filter(Boolean) as string[])).slice(0, 8);
@@ -101,17 +91,11 @@ function groupCount(listings: NtuListing[], max: number, min = 0) {
   }).length;
 }
 
-function formatSourceText(value: string | null | undefined) {
+function formatCleanText(value: string | null | undefined) {
   const text = String(value ?? "")
-    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => !/^\/?\s*(房源)?编号\s*[:：]?\s*[A-Za-z0-9_-]{4,}\s*$/i.test(line))
-    .filter((line) => !/^\/?\s*(listing|listing_id|listing id|id|source_id|source id)\s*[:：]?\s*[A-Za-z0-9_-]{4,}\s*$/i.test(line))
-    .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return text || "暂无原文";
+  return text || "暂无清洗后的房源信息";
 }
 
 async function getNtuListings() {
@@ -156,29 +140,16 @@ async function getNtuListings() {
   const cleanIds = Array.from(new Set(indexRows.map((listing) => listing.clean_listing_id).filter(Boolean) as string[]));
   const postalCodes = Array.from(new Set(indexRows.map((listing) => listing.postal_code).filter(Boolean) as string[]));
   const cleanById = new Map<string, CleanRow>();
-  const sourceTextByIngestionId = new Map<string, string | null>();
   const addressByPostalCode = new Map<string, string>();
 
   if (cleanIds.length > 0) {
     const { data: cleanData } = await supabase
       .from("listing_clean")
-      .select("id,ingestion_listing_id,available_from")
+      .select("id,available_from,clean_text")
       .in("id", cleanIds);
 
     for (const row of (cleanData ?? []) as CleanRow[]) {
       cleanById.set(row.id, row);
-    }
-
-    const ingestionIds = Array.from(new Set((cleanData ?? []).map((row) => row.ingestion_listing_id).filter(Boolean) as string[]));
-    if (ingestionIds.length > 0) {
-      const { data: ingestionData } = await supabase
-        .from("ingestion_listings")
-        .select("id,list_raw_text")
-        .in("id", ingestionIds);
-
-      for (const row of (ingestionData ?? []) as IngestionRow[]) {
-        sourceTextByIngestionId.set(row.id, row.list_raw_text || null);
-      }
     }
   }
 
@@ -202,12 +173,11 @@ async function getNtuListings() {
       const cleanRow = listing.clean_listing_id ? cleanById.get(listing.clean_listing_id) : null;
       return {
         id: listing.id,
-        clean_listing_id: listing.clean_listing_id,
         price: listing.price,
         postal_code: listing.postal_code,
         display_address: listing.postal_code ? addressByPostalCode.get(listing.postal_code) ?? null : null,
         commute_minutes: commuteByIndexId.get(listing.id) ?? null,
-        source_text: cleanRow?.ingestion_listing_id ? sourceTextByIngestionId.get(cleanRow.ingestion_listing_id) ?? null : null,
+        clean_text: cleanRow?.clean_text ?? null,
         tags: listing.tags,
         amenities: listing.amenities,
         room_type: listing.room_type,
@@ -284,9 +254,6 @@ export default async function HomePage() {
             <article key={listing.id} className="card overflow-hidden p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <div className="rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
                 <h2 className="text-lg font-bold leading-7 text-ink">{buildTitle(listing)}</h2>
-                {listing.clean_listing_id ? (
-                  <div className="mt-1 text-xs font-medium text-muted">房源ID：{listing.clean_listing_id}</div>
-                ) : null}
                 <div className="mt-3 flex items-end justify-between gap-3">
                   <div className="text-2xl font-bold text-brand">
                     {listing.price ? `$${listing.price}` : "询价"}<span className="text-sm font-medium text-muted"> / 月</span>
@@ -306,9 +273,9 @@ export default async function HomePage() {
               </div>
 
               <div className="mt-4 rounded-lg bg-gray-50 p-3">
-                <div className="mb-2 text-xs font-semibold text-ink">房源原文</div>
+                <div className="mb-2 text-xs font-semibold text-ink">房源信息</div>
                 <p className="max-h-44 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-muted">
-                  {formatSourceText(listing.source_text)}
+                  {formatCleanText(listing.clean_text)}
                 </p>
               </div>
             </article>
