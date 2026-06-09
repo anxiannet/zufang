@@ -1,8 +1,30 @@
 import Link from "next/link";
+import { unstable_noStore as noStore } from "next/cache";
 import { getCurrentProfile } from "@/lib/auth";
+import { supabaseRequest } from "@/src/db/pool";
 import CommuteActionPanel from "./CommuteActionPanel";
 
+type ListingIndexRow = {
+  id: string;
+  postal_code: string | null;
+  status: string | null;
+};
+
+type CommuteCacheRow = {
+  listing_index_id: string;
+};
+
+type CommuteStats = {
+  active: number;
+  withPostal: number;
+  cached: number;
+  pending: number;
+};
+
+const POSTAL_CODE_PATTERN = /^\d{6}$/;
+
 export default async function AdminCommutePage() {
+  noStore();
   const profile = await getCurrentProfile();
 
   if (!profile) {
@@ -21,6 +43,8 @@ export default async function AdminCommutePage() {
     );
   }
 
+  const stats = await getCommuteStats();
+
   return (
     <AdminShell>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -32,12 +56,67 @@ export default async function AdminCommutePage() {
         <Link href="/admin" className="btn-secondary">返回后台</Link>
       </div>
 
+      <CommuteStatsPanel stats={stats} />
+
       <section className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-        建议日常顺序：先点“扫描补漏”，再点“真实执行”。OneMap 会优先使用 ONEMAP_API_TOKEN；没有固定 token 时，会用 ONEMAP_EMAIL + ONEMAP_PASSWORD 自动获取。
+        建议日常顺序：先点“扫描有邮编房源”，再点“计算 NTU 通勤”。系统只处理 active、有合法 6 位邮编、且没有 NTU bus 缓存的房源。
       </section>
 
       <CommuteActionPanel />
     </AdminShell>
+  );
+}
+
+async function getCommuteStats(): Promise<CommuteStats> {
+  try {
+    const [activeListings, cachedRows] = await Promise.all([
+      supabaseRequest<ListingIndexRow[]>("listing_indexes?select=id,postal_code,status&status=eq.active&limit=1000"),
+      supabaseRequest<CommuteCacheRow[]>(
+        "listing_commute_cache?select=listing_index_id&school_code=eq.NTU&mode=eq.bus&duration_minutes=not.is.null&limit=5000"
+      )
+    ]);
+
+    const validPostalListingIds = activeListings
+      .filter((row) => POSTAL_CODE_PATTERN.test(String(row.postal_code ?? "").trim()))
+      .map((row) => row.id);
+    const validPostalSet = new Set(validPostalListingIds);
+    const cachedSet = new Set(cachedRows.map((row) => row.listing_index_id).filter((id) => validPostalSet.has(id)));
+
+    return {
+      active: activeListings.length,
+      withPostal: validPostalListingIds.length,
+      cached: cachedSet.size,
+      pending: Math.max(validPostalListingIds.length - cachedSet.size, 0)
+    };
+  } catch (error) {
+    console.error("Failed to load commute stats", error);
+    return {
+      active: 0,
+      withPostal: 0,
+      cached: 0,
+      pending: 0
+    };
+  }
+}
+
+function CommuteStatsPanel({ stats }: { stats: CommuteStats }) {
+  const items = [
+    { label: "Active", value: stats.active, description: "当前 active 房源总数" },
+    { label: "有邮编", value: stats.withPostal, description: "合法 6 位新加坡邮编" },
+    { label: "已缓存", value: stats.cached, description: "已有 NTU bus 通勤缓存" },
+    { label: "待计算", value: stats.pending, description: "需要补算 NTU 通勤" }
+  ];
+
+  return (
+    <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {items.map((item) => (
+        <div key={item.label} className="rounded-lg border border-line bg-white p-4 shadow-sm">
+          <div className="text-sm text-muted">{item.label}</div>
+          <div className="mt-2 text-3xl font-bold text-ink">{item.value}</div>
+          <div className="mt-1 text-xs text-muted">{item.description}</div>
+        </div>
+      ))}
+    </section>
   );
 }
 
