@@ -3,17 +3,12 @@ import { supabaseRequest } from "../db/pool";
 type ListingIndexQueueInput = {
   id: string;
   postal_code: string | null;
-  search_text: string | null;
-  title: string | null;
-  summary: string | null;
-  mrt_area: string | null;
   status?: string | null;
 };
 
 type NormalizedListingIndexQueueInput = {
   id: string;
-  postal_code: string | null;
-  address_text: string | null;
+  postal_code: string;
   status?: string | null;
 };
 
@@ -21,7 +16,6 @@ type CommuteJobRow = {
   id: string;
   listing_index_id: string;
   postal_code: string | null;
-  address_text: string | null;
   status: string;
 };
 
@@ -32,23 +26,23 @@ export type CommuteQueueSummary = {
   errors: number;
 };
 
+const POSTAL_CODE_PATTERN = /^\d{6}$/;
+
 export async function enqueueCommuteJobForListingIndex(row: NormalizedListingIndexQueueInput): Promise<"enqueued" | "skipped"> {
   if (row.status && row.status !== "active") return "skipped";
-  if (!row.postal_code && !row.address_text) return "skipped";
+
+  const postal = String(row.postal_code ?? "").trim();
+  if (!POSTAL_CODE_PATTERN.test(postal)) return "skipped";
 
   const existingRows = await supabaseRequest<CommuteJobRow[]>(
-    `commute_enrichment_jobs?select=id,listing_index_id,postal_code,address_text,status&listing_index_id=eq.${encodeURIComponent(row.id)}&limit=1`
+    `commute_enrichment_jobs?select=id,listing_index_id,postal_code,status&listing_index_id=eq.${encodeURIComponent(row.id)}&limit=1`
   );
   const existing = existingRows[0];
-  const addressChanged = existing
-    ? existing.postal_code !== row.postal_code || existing.address_text !== row.address_text
-    : true;
 
-  if (existing && existing.status === "completed" && !addressChanged) {
+  if (existing && existing.status === "completed" && existing.postal_code === postal) {
     return "skipped";
   }
 
-  const nextStatus = existing?.status === "completed" && !addressChanged ? "completed" : "pending";
   await supabaseRequest("commute_enrichment_jobs?on_conflict=listing_index_id", {
     method: "POST",
     headers: {
@@ -57,11 +51,10 @@ export async function enqueueCommuteJobForListingIndex(row: NormalizedListingInd
     },
     body: JSON.stringify({
       listing_index_id: row.id,
-      postal_code: row.postal_code,
-      address_text: row.address_text,
-      status: nextStatus,
-      retry_count: nextStatus === "pending" ? 0 : undefined,
-      last_error: nextStatus === "pending" ? null : undefined,
+      postal_code: postal,
+      status: "pending",
+      retry_count: 0,
+      last_error: null,
       updated_at: new Date().toISOString()
     })
   });
@@ -72,7 +65,7 @@ export async function enqueueCommuteJobForListingIndex(row: NormalizedListingInd
 export async function enqueueMissingCommuteJobs(limit = 100): Promise<CommuteQueueSummary> {
   const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 500);
   const rows = await supabaseRequest<ListingIndexQueueInput[]>(
-    `listing_indexes?select=id,postal_code,search_text,title,summary,mrt_area,status&status=eq.active&order=indexed_at.desc.nullsfirst&limit=${safeLimit}`
+    `listing_indexes?select=id,postal_code,status&status=eq.active&postal_code=not.is.null&travel_time_bus_ntu=is.null&order=indexed_at.desc.nullsfirst&limit=${safeLimit}`
   );
 
   const summary: CommuteQueueSummary = {
@@ -85,6 +78,11 @@ export async function enqueueMissingCommuteJobs(limit = 100): Promise<CommuteQue
   for (const row of rows) {
     try {
       const normalizedRow = normalizeListingIndexQueueInput(row);
+      if (!normalizedRow) {
+        summary.skipped += 1;
+        continue;
+      }
+
       const result = await enqueueCommuteJobForListingIndex(normalizedRow);
       if (result === "enqueued") summary.enqueued += 1;
       else summary.skipped += 1;
@@ -100,56 +98,13 @@ export async function enqueueMissingCommuteJobs(limit = 100): Promise<CommuteQue
   return summary;
 }
 
-function normalizeListingIndexQueueInput(row: ListingIndexQueueInput): NormalizedListingIndexQueueInput {
+function normalizeListingIndexQueueInput(row: ListingIndexQueueInput): NormalizedListingIndexQueueInput | null {
+  const postal = String(row.postal_code ?? "").trim();
+  if (!POSTAL_CODE_PATTERN.test(postal)) return null;
+
   return {
     id: row.id,
-    postal_code: row.postal_code,
-    address_text: buildFallbackAddress(row),
+    postal_code: postal,
     status: row.status
   };
-}
-
-function buildFallbackAddress(row: ListingIndexQueueInput): string | null {
-  const postalFromText = extractPostalCode(row.search_text) ?? extractPostalCode(row.summary) ?? extractPostalCode(row.title);
-  if (postalFromText) return postalFromText;
-
-  const blockStreet = extractBlockStreet(row.title) ?? extractBlockStreet(row.summary) ?? extractBlockStreet(row.search_text);
-  if (blockStreet) return blockStreet;
-
-  return firstUsefulLocation(row.title, row.summary, row.mrt_area);
-}
-
-function extractPostalCode(value: string | null | undefined): string | null {
-  const match = String(value ?? "").match(/\b\d{6}\b/);
-  return match?.[0] ?? null;
-}
-
-function extractBlockStreet(value: string | null | undefined): string | null {
-  const text = String(value ?? "").replace(/\s+/g, " ").trim();
-  if (!text) return null;
-
-  const blockMatch = text.match(/\b(?:blk|block)\s*([0-9]{1,4}[a-z]?)\b/i);
-  if (!blockMatch) return null;
-
-  const before = text.slice(0, blockMatch.index).split(/[\n,|;]/).pop()?.trim() ?? "";
-  const after = text.slice((blockMatch.index ?? 0) + blockMatch[0].length).split(/[\n,|;$]/)[0]?.trim() ?? "";
-  const block = `Blk ${blockMatch[1]}`;
-  const candidate = [before, block, after].filter(Boolean).join(" ").trim();
-
-  return candidate.length >= block.length ? candidate : block;
-}
-
-function firstUsefulLocation(...values: Array<string | null | undefined>): string | null {
-  for (const value of values) {
-    const text = String(value ?? "").trim();
-    if (!text) continue;
-    if (isGenericLocation(text)) continue;
-    return text.slice(0, 180);
-  }
-  return null;
-}
-
-function isGenericLocation(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return ["common room", "master room", "room", "studio"].includes(normalized);
 }
