@@ -14,11 +14,20 @@ type CommuteCacheRow = {
   listing_index_id: string;
 };
 
+type CommuteJobRow = {
+  id: string;
+  status: string | null;
+  postal_code: string | null;
+};
+
 type CommuteStats = {
   active: number;
   withPostal: number;
   cached: number;
-  pending: number;
+  theoreticalPending: number;
+  queuePending: number;
+  queueFailed: number;
+  invalidQueue: number;
 };
 
 const POSTAL_CODE_PATTERN = /^\d{6}$/;
@@ -59,7 +68,7 @@ export default async function AdminCommutePage() {
       <CommuteStatsPanel stats={stats} />
 
       <section className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-        建议日常顺序：先点“扫描有邮编房源”，再点“计算 NTU 通勤”。系统只处理 active、有合法 6 位邮编、且没有 NTU bus 缓存的房源。
+        建议日常顺序：先点“扫描有邮编房源”，再点“计算 NTU 通勤”。“理论待计算”来自房源与缓存差值；“队列待执行”才是执行器实际会处理的任务数。
       </section>
 
       <CommuteActionPanel />
@@ -69,11 +78,12 @@ export default async function AdminCommutePage() {
 
 async function getCommuteStats(): Promise<CommuteStats> {
   try {
-    const [activeListings, cachedRows] = await Promise.all([
+    const [activeListings, cachedRows, jobRows] = await Promise.all([
       supabaseRequest<ListingIndexRow[]>("listing_indexes?select=id,postal_code,status&status=eq.active&limit=1000"),
       supabaseRequest<CommuteCacheRow[]>(
         "listing_commute_cache?select=listing_index_id&school_code=eq.NTU&mode=eq.bus&duration_minutes=not.is.null&limit=5000"
-      )
+      ),
+      supabaseRequest<CommuteJobRow[]>("commute_enrichment_jobs?select=id,status,postal_code&limit=5000")
     ]);
 
     const validPostalListingIds = activeListings
@@ -86,7 +96,10 @@ async function getCommuteStats(): Promise<CommuteStats> {
       active: activeListings.length,
       withPostal: validPostalListingIds.length,
       cached: cachedSet.size,
-      pending: Math.max(validPostalListingIds.length - cachedSet.size, 0)
+      theoreticalPending: Math.max(validPostalListingIds.length - cachedSet.size, 0),
+      queuePending: jobRows.filter((row) => row.status === "pending" || row.status === "retry").length,
+      queueFailed: jobRows.filter((row) => row.status === "failed").length,
+      invalidQueue: jobRows.filter((row) => !POSTAL_CODE_PATTERN.test(String(row.postal_code ?? "").trim())).length
     };
   } catch (error) {
     console.error("Failed to load commute stats", error);
@@ -94,7 +107,10 @@ async function getCommuteStats(): Promise<CommuteStats> {
       active: 0,
       withPostal: 0,
       cached: 0,
-      pending: 0
+      theoreticalPending: 0,
+      queuePending: 0,
+      queueFailed: 0,
+      invalidQueue: 0
     };
   }
 }
@@ -104,7 +120,10 @@ function CommuteStatsPanel({ stats }: { stats: CommuteStats }) {
     { label: "Active", value: stats.active, description: "当前 active 房源总数" },
     { label: "有邮编", value: stats.withPostal, description: "合法 6 位新加坡邮编" },
     { label: "已缓存", value: stats.cached, description: "已有 NTU bus 通勤缓存" },
-    { label: "待计算", value: stats.pending, description: "需要补算 NTU 通勤" }
+    { label: "理论待计算", value: stats.theoreticalPending, description: "有邮编但无 NTU 缓存" },
+    { label: "队列待执行", value: stats.queuePending, description: "pending/retry 实际任务" },
+    { label: "队列失败", value: stats.queueFailed, description: "failed 任务数量" },
+    { label: "无效队列", value: stats.invalidQueue, description: "无效或空邮编任务" }
   ];
 
   return (
