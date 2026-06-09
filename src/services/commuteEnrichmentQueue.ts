@@ -73,9 +73,10 @@ export async function enqueueCommuteJobForListingIndex(row: NormalizedListingInd
 }
 
 export async function enqueueMissingCommuteJobs(limit = 100): Promise<CommuteQueueSummary> {
-  const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 500);
+  const targetLimit = Math.min(Math.max(Math.trunc(limit), 1), 500);
+  const scanLimit = Math.max(targetLimit, 1000);
   const rows = await supabaseRequest<ListingIndexQueueInput[]>(
-    `listing_indexes?select=id,postal_code,status&status=eq.active&postal_code=not.is.null&order=indexed_at.desc.nullsfirst&limit=${safeLimit}`
+    `listing_indexes?select=id,postal_code,status&status=eq.active&postal_code=not.is.null&order=indexed_at.desc.nullsfirst&limit=${scanLimit}`
   );
 
   const cachedListingIds = await fetchCachedNtuBusListingIds(rows.map((row) => row.id));
@@ -87,6 +88,11 @@ export async function enqueueMissingCommuteJobs(limit = 100): Promise<CommuteQue
   };
 
   for (const row of rows) {
+    if (summary.enqueued >= targetLimit) {
+      summary.skipped += 1;
+      continue;
+    }
+
     try {
       if (cachedListingIds.has(row.id)) {
         summary.skipped += 1;
