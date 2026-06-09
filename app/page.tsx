@@ -101,7 +101,15 @@ function groupCount(listings: NtuListing[], max: number, min = 0) {
 }
 
 function formatSourceText(value: string | null | undefined) {
-  const text = String(value ?? "").replace(/\n{3,}/g, "\n\n").trim();
+  const text = String(value ?? "")
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => !/^\/?\s*(房源)?编号\s*[:：]?\s*[A-Za-z0-9_-]{4,}\s*$/i.test(line))
+    .filter((line) => !/^\/?\s*(listing|listing_id|listing id|id|source_id|source id)\s*[:：]?\s*[A-Za-z0-9_-]{4,}\s*$/i.test(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   return text || "暂无原文";
 }
 
