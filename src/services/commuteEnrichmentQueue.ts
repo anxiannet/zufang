@@ -34,11 +34,12 @@ const POSTAL_CODE_PATTERN = /^\d{6}$/;
 const NTU_SCHOOL_CODE = "NTU";
 const BUS_MODE = "bus";
 
-export async function enqueueCommuteJobForListingIndex(row: NormalizedListingIndexQueueInput): Promise<"enqueued" | "skipped"> {
+export async function enqueueCommuteJobForListingIndex(input: ListingIndexQueueInput): Promise<"enqueued" | "skipped"> {
+  const row = normalizeListingIndexQueueInput(input);
+  if (!row) return "skipped";
   if (row.status && row.status !== "active") return "skipped";
 
-  const postal = String(row.postal_code ?? "").trim();
-  if (!POSTAL_CODE_PATTERN.test(postal)) return "skipped";
+  const postal = row.postal_code;
 
   if (await hasExistingNtuBusCache(row.id)) {
     return "skipped";
@@ -99,13 +100,7 @@ export async function enqueueMissingCommuteJobs(limit = 100): Promise<CommuteQue
         continue;
       }
 
-      const normalizedRow = normalizeListingIndexQueueInput(row);
-      if (!normalizedRow) {
-        summary.skipped += 1;
-        continue;
-      }
-
-      const result = await enqueueCommuteJobForListingIndex(normalizedRow);
+      const result = await enqueueCommuteJobForListingIndex(row);
       if (result === "enqueued") summary.enqueued += 1;
       else summary.skipped += 1;
     } catch (error) {
