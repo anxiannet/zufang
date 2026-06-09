@@ -15,7 +15,7 @@ export default function CommuteActionPanel() {
   const [runningAction, setRunningAction] = useState<string | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
 
-  async function runAction(action: string, limit?: number, school: SchoolCode = "ALL") {
+  async function runAction(action: string, limit?: number, school: SchoolCode = "NTU") {
     setRunningAction(action);
     setResult(null);
 
@@ -40,7 +40,7 @@ export default function CommuteActionPanel() {
   return (
     <section className="card p-4">
       <h2 className="text-lg font-semibold text-ink">任务调用</h2>
-      <p className="mt-1 text-sm text-muted">点击后会立即显示执行状态，不依赖 Server Action 页面跳转。</p>
+      <p className="mt-1 text-sm text-muted">V1 只计算 NTU。没有合法 6 位邮编、或已经有 NTU bus 缓存的房源会跳过。</p>
 
       {result ? (
         <div className={`mt-4 rounded-md border p-3 text-sm ${result.success ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>
@@ -52,36 +52,36 @@ export default function CommuteActionPanel() {
 
       <div className="mt-4 grid gap-3 lg:grid-cols-4">
         <ActionCard
-          title="扫描补漏"
-          description="扫描 active listing_indexes，为有邮编或地址但缺 job 的房源补建通勤任务。"
+          title="扫描有邮编房源"
+          description="只扫描 active、合法 6 位邮编、且没有 NTU bus 缓存的房源。不会使用 address_text。"
           button="扫描入队"
           disabled={Boolean(runningAction)}
           loading={runningAction === "enqueue_missing"}
-          onClick={() => runAction("enqueue_missing", 100)}
+          onClick={() => runAction("enqueue_missing", 100, "NTU")}
         />
         <ActionCard
-          title="Dry-run"
-          description="读取 pending/retry 并调用 OneMap，但不写入坐标、通勤或任务状态。"
-          button="Dry-run"
+          title="Dry-run NTU"
+          description="读取 pending/retry 并调用 OneMap 预检 NTU 通勤，但不写入坐标、通勤或任务状态。"
+          button="Dry-run NTU"
           disabled={Boolean(runningAction)}
           loading={runningAction === "dry_run"}
-          onClick={() => runAction("dry_run", 3, "ALL")}
+          onClick={() => runAction("dry_run", 3, "NTU")}
         />
         <ActionCard
-          title="真实执行"
-          description="小批量写入坐标、四校公交通勤、completed/failed/retry 状态。"
-          button="执行补齐"
+          title="计算 NTU 通勤"
+          description="小批量写入 NTU bus 通勤缓存，并更新 completed/failed/retry 状态。"
+          button="计算 NTU"
           disabled={Boolean(runningAction)}
           loading={runningAction === "run"}
-          onClick={() => runAction("run", 10, "ALL")}
+          onClick={() => runAction("run", 10, "NTU")}
         />
         <ActionCard
           title="重试失败"
-          description="将 failed 任务重新置为 pending。适合修正地址或 OneMap 临时异常后使用。"
+          description="将 failed 任务重新置为 pending。适合 OneMap 临时异常或修复数据后使用。"
           button="重试 failed"
           disabled={Boolean(runningAction)}
           loading={runningAction === "retry_failed"}
-          onClick={() => runAction("retry_failed")}
+          onClick={() => runAction("retry_failed", undefined, "NTU")}
         />
       </div>
     </section>
