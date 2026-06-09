@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 
 type NtuListing = {
   id: string;
+  clean_listing_id: string | null;
   price: number | null;
   postal_code: string | null;
   display_address: string | null;
@@ -201,6 +202,7 @@ async function getNtuListings() {
       const cleanRow = listing.clean_listing_id ? cleanById.get(listing.clean_listing_id) : null;
       return {
         id: listing.id,
+        clean_listing_id: listing.clean_listing_id,
         price: listing.price,
         postal_code: listing.postal_code,
         display_address: listing.postal_code ? addressByPostalCode.get(listing.postal_code) ?? null : null,
@@ -282,6 +284,9 @@ export default async function HomePage() {
             <article key={listing.id} className="card overflow-hidden p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <div className="rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
                 <h2 className="text-lg font-bold leading-7 text-ink">{buildTitle(listing)}</h2>
+                {listing.clean_listing_id ? (
+                  <div className="mt-1 text-xs font-medium text-muted">房源ID：{listing.clean_listing_id}</div>
+                ) : null}
                 <div className="mt-3 flex items-end justify-between gap-3">
                   <div className="text-2xl font-bold text-brand">
                     {listing.price ? `$${listing.price}` : "询价"}<span className="text-sm font-medium text-muted"> / 月</span>
