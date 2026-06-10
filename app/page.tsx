@@ -6,7 +6,6 @@ type NtuListing = {
   postal_code: string | null;
   display_address: string | null;
   commute_minutes: number | null;
-  summary_ai: string | null;
   clean_text: string | null;
   tags: string[] | null;
   amenities: string[] | null;
@@ -41,9 +40,12 @@ type CleanRow = {
   clean_text: string | null;
 };
 
-type AiRow = {
-  listing_index_id: string;
-  summary_ai: string | null;
+type GeocodingRow = {
+  postal_code: string | null;
+  address: string | null;
+  block: string | null;
+  road_name: string | null;
+  building: string | null;
 };
 
 const quickAreas = ["≤30分钟", "31-45分钟", "46-60分钟"];
@@ -70,8 +72,30 @@ function labelGender(value: string | null) {
   return value;
 }
 
+function sanitizeAddressPart(value: string | null | undefined) {
+  return String(value ?? "")
+    .replace(/\bSingapore\b/gi, "")
+    .replace(/\bS\(?\d{6}\)?\b/gi, "")
+    .replace(/\b\d{6}\b/g, "")
+    .replace(/\s*,\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildDisplayAddress(row: GeocodingRow) {
+  const building = sanitizeAddressPart(row.building);
+  const block = sanitizeAddressPart(row.block);
+  const roadName = sanitizeAddressPart(row.road_name);
+  const structured = [building, block ? `Blk ${block}` : null, roadName].filter(Boolean).join(" · ");
+  if (structured) return structured;
+
+  const address = sanitizeAddressPart(row.address);
+  return address && !/^\d{6}$/.test(address) ? address : null;
+}
+
 function buildTitle(listing: NtuListing) {
-  return [listing.display_address || listing.postal_code || "地址待确认", labelRoomType(listing)].filter(Boolean).join(" · ");
+  const location = sanitizeAddressPart(listing.display_address);
+  return [location || "地址待确认", labelRoomType(listing)].filter(Boolean).join(" · ");
 }
 
 function buildTags(listing: NtuListing) {
@@ -102,13 +126,6 @@ function formatCleanText(value: string | null | undefined) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return text || "暂无清洗后的房源信息";
-}
-
-function formatAiSummary(value: string | null | undefined) {
-  const text = String(value ?? "")
-    .replace(/\n{2,}/g, "\n")
-    .trim();
-  return text || "暂无AI简介";
 }
 
 async function getNtuListings() {
@@ -153,7 +170,6 @@ async function getNtuListings() {
   const cleanIds = Array.from(new Set(indexRows.map((listing) => listing.clean_listing_id).filter(Boolean) as string[]));
   const postalCodes = Array.from(new Set(indexRows.map((listing) => listing.postal_code).filter(Boolean) as string[]));
   const cleanById = new Map<string, CleanRow>();
-  const summaryByIndexId = new Map<string, string | null>();
   const addressByPostalCode = new Map<string, string>();
 
   if (cleanIds.length > 0) {
@@ -167,17 +183,6 @@ async function getNtuListings() {
     }
   }
 
-  if (indexIds.length > 0) {
-    const { data: aiData } = await supabase
-      .from("listing_ai_analysis")
-      .select("listing_index_id,summary_ai")
-      .in("listing_index_id", indexIds);
-
-    for (const row of (aiData ?? []) as AiRow[]) {
-      summaryByIndexId.set(row.listing_index_id, row.summary_ai);
-    }
-  }
-
   if (postalCodes.length > 0) {
     const { data: geocodingRows } = await supabase
       .from("geocoding_cache")
@@ -185,11 +190,10 @@ async function getNtuListings() {
       .in("postal_code", postalCodes)
       .eq("status", "success");
 
-    for (const row of geocodingRows ?? []) {
+    for (const row of (geocodingRows ?? []) as GeocodingRow[]) {
       if (!row.postal_code) continue;
-      const fallbackAddress = [row.building, row.block ? `Blk ${row.block}` : null, row.road_name, row.postal_code].filter(Boolean).join(" · ");
-      const address = row.address || fallbackAddress;
-      if (address) addressByPostalCode.set(row.postal_code, address);
+      const displayAddress = buildDisplayAddress(row);
+      if (displayAddress) addressByPostalCode.set(row.postal_code, displayAddress);
     }
   }
 
@@ -202,7 +206,6 @@ async function getNtuListings() {
         postal_code: listing.postal_code,
         display_address: listing.postal_code ? addressByPostalCode.get(listing.postal_code) ?? null : null,
         commute_minutes: commuteByIndexId.get(listing.id) ?? null,
-        summary_ai: summaryByIndexId.get(listing.id) ?? null,
         clean_text: cleanRow?.clean_text ?? null,
         tags: listing.tags,
         amenities: listing.amenities,
@@ -298,14 +301,7 @@ export default async function HomePage() {
                 ))}
               </div>
 
-              <div className="mt-4 rounded-lg border border-teal-100 bg-teal-50 p-3">
-                <div className="mb-2 text-xs font-semibold text-brand">AI简介</div>
-                <p className="whitespace-pre-wrap text-xs leading-5 text-ink">
-                  {formatAiSummary(listing.summary_ai)}
-                </p>
-              </div>
-
-              <div className="mt-3 rounded-lg bg-gray-50 p-3">
+              <div className="mt-4 rounded-lg bg-gray-50 p-3">
                 <div className="mb-2 text-xs font-semibold text-ink">房源信息</div>
                 <p className="max-h-44 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-muted">
                   {formatCleanText(listing.clean_text)}
