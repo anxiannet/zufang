@@ -245,7 +245,7 @@ export default async function HomePage() {
           </div>
           <div className="grid grid-cols-2 gap-3 text-center">
             <div className="rounded-xl bg-gray-50 p-4">
-              <div className="text-2xl font-bold text-brand">{listings.length}</div>
+              <div className="text-2xl font-bold text-brand">{pricedListings.length}</div>
               <div className="mt-1 text-xs text-muted">60分钟内</div>
             </div>
             <div className="rounded-xl bg-gray-50 p-4">
@@ -257,9 +257,9 @@ export default async function HomePage() {
       </section>
 
       <section className="grid gap-3 text-sm sm:grid-cols-3">
-        <div className="card p-4"><span className="font-semibold text-brand">≤30分钟：</span>{groupCount(listings, 30)} 间</div>
-        <div className="card p-4"><span className="font-semibold text-brand">31-45分钟：</span>{groupCount(listings, 45, 30)} 间</div>
-        <div className="card p-4"><span className="font-semibold text-brand">46-60分钟：</span>{groupCount(listings, 60, 45)} 间</div>
+        <div className="card p-4"><span className="font-semibold text-brand">≤30分钟：</span>{groupCount(pricedListings, 30)} 间</div>
+        <div className="card p-4"><span className="font-semibold text-brand">31-45分钟：</span>{groupCount(pricedListings, 45, 30)} 间</div>
+        <div className="card p-4"><span className="font-semibold text-brand">46-60分钟：</span>{groupCount(pricedListings, 60, 45)} 间</div>
       </section>
 
       <section className="card p-5 text-sm leading-7 text-muted">
@@ -274,17 +274,17 @@ export default async function HomePage() {
         <p>用户需自行核实房东身份及房源真实性。</p>
       </section>
 
-      {listings.length === 0 ? (
+      {pricedListings.length === 0 ? (
         <section className="card p-8 text-center text-muted">暂时没有 NTU 60分钟内通勤房源。请先运行通勤计算或检查 listing_commute_cache。</section>
       ) : (
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {listings.map((listing) => (
+          {pricedListings.map((listing) => (
             <article key={listing.id} className="card overflow-hidden p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <div className="rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
                 <h2 className="text-lg font-bold leading-7 text-ink">{buildTitle(listing)}</h2>
                 <div className="mt-3 flex items-end justify-between gap-3">
                   <div className="text-2xl font-bold text-brand">
-                    {listing.price ? `$${listing.price}` : "询价"}<span className="text-sm font-medium text-muted"> / 月</span>
+                    ${listing.price}<span className="text-sm font-medium text-muted"> / 月</span>
                   </div>
                   <div className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-brand shadow-sm">
                     {listing.commute_minutes}分钟
