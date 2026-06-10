@@ -145,12 +145,10 @@ function buildTitle(listing: NtuListing) {
 }
 
 function buildTags(listing: NtuListing) {
-  const commuteTag = listing.commute_minutes ? `到NTU约${listing.commute_minutes}分钟` : null;
   const baseTags = [
     labelRoomType(listing),
     labelGender(listing.gender_preference),
-    listing.cooking_allowed === true ? "可煮" : null,
-    commuteTag
+    listing.cooking_allowed === true ? "可煮" : null
   ];
 
   const dbTags = [...(listing.tags ?? []), ...(listing.amenities ?? [])]
