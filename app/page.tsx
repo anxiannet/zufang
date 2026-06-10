@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 
 type NtuListing = {
   id: string;
+  listing_no: number | null;
   price: number | null;
   postal_code: string | null;
   display_address: string | null;
@@ -23,6 +24,7 @@ type CommuteRow = {
 
 type IndexRow = {
   id: string;
+  listing_no: number | null;
   clean_listing_id: string | null;
   price: number | null;
   postal_code: string | null;
@@ -156,7 +158,7 @@ async function getNtuListings() {
 
   const { data: indexData, error: indexError } = await supabase
     .from("listing_indexes")
-    .select("id,clean_listing_id,price,postal_code,tags,amenities,room_type,normalized_room_type,cooking_allowed,gender_preference")
+    .select("id,listing_no,clean_listing_id,price,postal_code,tags,amenities,room_type,normalized_room_type,cooking_allowed,gender_preference")
     .in("id", indexIds)
     .eq("status", "active");
 
@@ -201,6 +203,7 @@ async function getNtuListings() {
       const cleanRow = listing.clean_listing_id ? cleanById.get(listing.clean_listing_id) : null;
       return {
         id: listing.id,
+        listing_no: listing.listing_no,
         price: listing.price,
         postal_code: listing.postal_code,
         display_address: listing.postal_code ? addressByPostalCode.get(listing.postal_code) ?? null : null,
@@ -281,7 +284,12 @@ export default async function HomePage() {
           {pricedListings.map((listing) => (
             <article key={listing.id} className="card overflow-hidden p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
               <div className="rounded-xl bg-gradient-to-br from-teal-50 to-gray-50 p-4">
-                <h2 className="text-lg font-bold leading-7 text-ink">{buildTitle(listing)}</h2>
+                <div className="flex items-start justify-between gap-3">
+                  <h2 className="text-lg font-bold leading-7 text-ink">{buildTitle(listing)}</h2>
+                  {listing.listing_no ? (
+                    <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-bold text-brand shadow-sm">#{listing.listing_no}</span>
+                  ) : null}
+                </div>
                 <div className="mt-3 flex items-end justify-between gap-3">
                   <div className="text-2xl font-bold text-brand">
                     ${listing.price}<span className="text-sm font-medium text-muted"> / 月</span>
