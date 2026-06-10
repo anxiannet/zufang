@@ -72,10 +72,10 @@ function labelGender(value: string | null) {
   return value;
 }
 
-function sanitizeAddressPart(value: string | null | undefined) {
+function sanitizeAddressText(value: string | null | undefined) {
   return String(value ?? "")
     .replace(/\bSingapore\b/gi, "")
-    .replace(/\bS\(?\d{6}\)?\b/gi, "")
+    .replace(/S\(?\d{6}\)?/gi, "")
     .replace(/\b\d{6}\b/g, "")
     .replace(/\s*,\s*/g, " ")
     .replace(/\s+/g, " ")
@@ -83,18 +83,17 @@ function sanitizeAddressPart(value: string | null | undefined) {
 }
 
 function buildDisplayAddress(row: GeocodingRow) {
-  const building = sanitizeAddressPart(row.building);
-  const block = sanitizeAddressPart(row.block);
-  const roadName = sanitizeAddressPart(row.road_name);
-  const structured = [building, block ? `Blk ${block}` : null, roadName].filter(Boolean).join(" · ");
-  if (structured) return structured;
+  const geocodedAddress = sanitizeAddressText(row.address);
+  if (geocodedAddress) return geocodedAddress;
 
-  const address = sanitizeAddressPart(row.address);
-  return address && !/^\d{6}$/.test(address) ? address : null;
+  const building = sanitizeAddressText(row.building);
+  const block = sanitizeAddressText(row.block);
+  const roadName = sanitizeAddressText(row.road_name);
+  return [building, block ? `Blk ${block}` : null, roadName].filter(Boolean).join(" · ") || null;
 }
 
 function buildTitle(listing: NtuListing) {
-  const location = sanitizeAddressPart(listing.display_address);
+  const location = sanitizeAddressText(listing.display_address);
   return [location || "地址待确认", labelRoomType(listing)].filter(Boolean).join(" · ");
 }
 
