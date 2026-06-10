@@ -8,6 +8,17 @@ type GeocodingCacheRow = {
   status: GeocodingStatus;
 };
 
+type GeocodingCacheLookupRow = GeocodingCacheRow & {
+  address: string | null;
+  block: string | null;
+  road_name: string | null;
+  building: string | null;
+};
+
+type ListingPostalCodeRow = {
+  postal_code: string | null;
+};
+
 type OneMapResult = {
   SEARCHVAL?: string;
   BLK_NO?: string;
@@ -78,13 +89,18 @@ Deno.serve(async (req: Request) => {
       return json({ enqueued: data?.length ?? 0 });
     }
 
-    if (action !== "run") return json({ error: `Unsupported action: ${action}` }, 400);
+    if (action !== "run" && action !== "rerun_missing") {
+      return json({ error: `Unsupported action: ${action}` }, 400);
+    }
 
     const rows = postalCode
       ? await prepareSinglePostalCode(supabase, postalCode)
-      : await getPendingPostalCodes(supabase, limit);
+      : action === "rerun_missing"
+        ? await prepareMissingPostalCodes(supabase, limit)
+        : await getPendingPostalCodes(supabase, limit);
 
     const summary = {
+      enqueued: action === "rerun_missing" ? rows.length : undefined,
       processed_count: 0,
       success_count: 0,
       not_found_count: 0,
@@ -162,6 +178,67 @@ async function prepareSinglePostalCode(supabase: ReturnType<typeof createSupabas
   return (data ?? []) as GeocodingCacheRow[];
 }
 
+async function prepareMissingPostalCodes(supabase: ReturnType<typeof createSupabaseAdminClient>, limit: number) {
+  const { data: listingRows, error: listingError } = await supabase
+    .from("listing_indexes")
+    .select("postal_code")
+    .eq("status", "active")
+    .not("postal_code", "is", null)
+    .limit(5000);
+
+  if (listingError) throw listingError;
+
+  const postalCodes = Array.from(
+    new Set(
+      ((listingRows ?? []) as ListingPostalCodeRow[])
+        .map((row) => cleanPostalCode(row.postal_code))
+        .filter(Boolean)
+    )
+  );
+
+  if (postalCodes.length === 0) return [];
+
+  const { data: cacheRows, error: cacheError } = await supabase
+    .from("geocoding_cache")
+    .select("postal_code,status,address,block,road_name,building")
+    .in("postal_code", postalCodes);
+
+  if (cacheError) throw cacheError;
+
+  const cacheByPostalCode = new Map(
+    ((cacheRows ?? []) as GeocodingCacheLookupRow[]).map((row) => [row.postal_code, row])
+  );
+
+  const selectedPostalCodes = postalCodes
+    .filter((code) => isMissingGeocoding(cacheByPostalCode.get(code)))
+    .slice(0, limit);
+
+  if (selectedPostalCodes.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("geocoding_cache")
+    .upsert(
+      selectedPostalCodes.map((code) => ({
+        postal_code: code,
+        status: "pending",
+        error_message: null,
+        updated_at: new Date().toISOString()
+      })),
+      { onConflict: "postal_code" }
+    )
+    .select("postal_code,status");
+
+  if (error) throw error;
+  return (data ?? []) as GeocodingCacheRow[];
+}
+
+function isMissingGeocoding(row: GeocodingCacheLookupRow | undefined) {
+  if (!row) return true;
+  if (row.status !== "success") return true;
+  return ![row.address, row.block, row.road_name, row.building]
+    .some((value) => String(value ?? "").trim().length > 0);
+}
+
 async function getPendingPostalCodes(supabase: ReturnType<typeof createSupabaseAdminClient>, limit: number) {
   const { data, error } = await supabase
     .from("geocoding_cache")
@@ -231,6 +308,9 @@ async function saveSuccess(
       latitude: result.latitude,
       longitude: result.longitude,
       address: result.address,
+      block: result.raw_result.BLK_NO ?? null,
+      road_name: result.raw_result.ROAD_NAME ?? null,
+      building: result.raw_result.SEARCHVAL ?? null,
       error_message: null,
       distance_to_ntu_km: distanceKm(result.latitude, result.longitude, NTU.latitude, NTU.longitude),
       raw_result: result.raw_result,
