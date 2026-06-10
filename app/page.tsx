@@ -62,16 +62,61 @@ const roomTypeLabels: Record<string, string> = {
   studio: "Studio"
 };
 
+const tagLabels: Record<string, string> = {
+  aircon: "空调",
+  ac: "空调",
+  wifi: "WiFi",
+  internet: "网络",
+  utilities_included: "包水电",
+  utilities: "包水电",
+  water_electricity_included: "包水电",
+  single_only: "单人入住",
+  couple_allowed: "可双人",
+  double_allowed: "可双人",
+  two_pax_allowed: "可双人",
+  no_owner: "无屋主同住",
+  owner_not_staying: "无屋主同住",
+  address_registration: "可报地址",
+  can_register_address: "可报地址",
+  near_mrt: "近地铁",
+  near_ntu: "近NTU",
+  private_bathroom: "独立卫浴",
+  ensuite: "独立卫浴",
+  washer: "洗衣机",
+  washing_machine: "洗衣机",
+  fridge: "冰箱",
+  refrigerator: "冰箱",
+  desk: "书桌",
+  wardrobe: "衣柜",
+  swimming_pool: "游泳池",
+  gym: "健身房",
+  cooking_allowed: "可煮"
+};
+
+const hiddenTags = new Set(["any", "不限", "unknown", "null", "none", "n/a", "na", "false"]);
+
 function labelRoomType(listing: NtuListing) {
   const raw = listing.normalized_room_type || listing.room_type || "房间";
   return roomTypeLabels[raw] ?? raw;
 }
 
 function labelGender(value: string | null) {
-  if (!value || value === "any" || value === "不限") return "不限";
-  if (value.toLowerCase().includes("female") || value.includes("女")) return "限女生";
-  if (value.toLowerCase().includes("male") || value.includes("男")) return "限男生";
-  return value;
+  if (!value || value === "any" || value === "不限") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "single_only") return "单人入住";
+  if (normalized.includes("female") || value.includes("女")) return "限女生";
+  if (normalized.includes("male") || value.includes("男")) return "限男生";
+  return normalizeTag(value);
+}
+
+function normalizeTag(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+
+  const key = raw.toLowerCase().replace(/[\s-]+/g, "_");
+  if (hiddenTags.has(key) || /[0-9]{6,}/.test(raw)) return null;
+
+  return tagLabels[key] ?? raw;
 }
 
 function sanitizeAddressText(value: string | null | undefined) {
@@ -102,15 +147,15 @@ function buildTitle(listing: NtuListing) {
 function buildTags(listing: NtuListing) {
   const commuteTag = listing.commute_minutes ? `到NTU约${listing.commute_minutes}分钟` : null;
   const baseTags = [
-    commuteTag,
+    labelRoomType(listing),
+    labelGender(listing.gender_preference),
     listing.cooking_allowed === true ? "可煮" : null,
-    labelGender(listing.gender_preference) !== "不限" ? labelGender(listing.gender_preference) : null,
-    labelRoomType(listing)
+    commuteTag
   ];
 
   const dbTags = [...(listing.tags ?? []), ...(listing.amenities ?? [])]
-    .map((tag) => String(tag).trim())
-    .filter((tag) => tag && tag.length <= 12 && !/[0-9]{6,}/.test(tag));
+    .map((tag) => normalizeTag(tag))
+    .filter((tag): tag is string => Boolean(tag) && tag.length <= 12);
 
   return Array.from(new Set([...baseTags, ...dbTags].filter(Boolean) as string[])).slice(0, 8);
 }
