@@ -69,6 +69,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             <Link href="/admin/crawler" className="btn-secondary">采集任务</Link>
             <Link href="/admin/ingestion" className="btn-primary">管理采集数据</Link>
             <Link href="/admin/geocoding" className="btn-primary">地理编码中心</Link>
+            <Link href="/admin/geocoding/missing" className="btn-secondary">补全缺失邮编</Link>
             <Link href="/admin/commute" className="btn-primary">真实通勤调试</Link>
           </div>
         </div>
