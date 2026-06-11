@@ -63,11 +63,11 @@ export type NtuCommuteCache = {
 
 export type ListingCard = {
   id: string;
-  listing_no: number;
+  listing_no: number | null;
   title: string;
   rent_amount: number;
   room_type: string | null;
-  postal_code: string;
+  postal_code: string | null;
   available_from: string;
   available_note: string | null;
   min_lease_months: number;
@@ -81,6 +81,9 @@ export type ListingCard = {
   geocoding: ListingGeocoding | null;
   ntu_commute: NtuCommuteCache | null;
   listing_images?: { image_url: string; sort_order: number; caption: string | null }[];
+  card_source?: "official" | "candidate";
+  source_label?: string;
+  source_url?: string | null;
 };
 
 export type ListingDetail = ListingCard & {
