@@ -119,33 +119,3 @@ export interface IngestionListingRow {
   scraped_at: string | null;
   created_at?: string | null;
 }
-
-export interface ListingIndexRow {
-  source: string;
-  source_id: string;
-  clean_listing_id: string;
-  title: string;
-  summary: string | null;
-  price: number | null;
-  mrt_area: string | null;
-  tags: string[];
-  body_text: string | null;
-  search_text: string;
-  room_type: string | null;
-  normalized_room_type: string;
-  cooking_allowed: boolean | null;
-  can_register_address: boolean | null;
-  landlord_stay: boolean | null;
-  gender_preference: string | null;
-  amenities: string[];
-  postal_code: string | null;
-  fingerprint: string;
-  indexed_at: string;
-  near_ntu: boolean;
-  ntu_score: number;
-  student_friendly: boolean;
-  match_reasons: string[];
-  school_fit_tags: string[];
-  semantic_tags: string[];
-  status: "active" | "removed" | "invalid";
-}

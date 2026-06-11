@@ -54,12 +54,19 @@ export type ListingGeocoding = {
   longitude: number | null;
 };
 
+export type NtuCommuteCache = {
+  postal_code: string;
+  ntu_bus_minutes: number | null;
+  ntu_drive_minutes: number | null;
+  computed_at: string | null;
+};
+
 export type ListingCard = {
   id: string;
   listing_no: number;
   title: string;
   rent_amount: number;
-  room_type: string;
+  room_type: string | null;
   postal_code: string;
   available_from: string;
   available_note: string | null;
@@ -72,6 +79,7 @@ export type ListingCard = {
   description: string | null;
   description_clean: string | null;
   geocoding: ListingGeocoding | null;
+  ntu_commute: NtuCommuteCache | null;
   listing_images?: { image_url: string; sort_order: number; caption: string | null }[];
 };
 

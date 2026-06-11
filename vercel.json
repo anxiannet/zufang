@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/cron/enrich-commute",
+      "path": "/api/cron/enrich-ntu-commute",
       "schedule": "30 20 * * *"
     }
   ]

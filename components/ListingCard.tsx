@@ -6,7 +6,8 @@ const roomLabels: Record<string, string> = {
   common_room: "普通房",
   master_room: "主人房",
   single_room: "单人间",
-  partition_room: "单人间",
+  partition_room: "隔间",
+  maid_room: "佣人房",
   studio: "Studio公寓"
 };
 
@@ -40,12 +41,18 @@ export function ListingCard({ listing }: { listing: ListingCardType }) {
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 text-xs text-ink">
-          <span className="rounded bg-gray-50 px-2 py-1">{roomLabels[listing.room_type] ?? listing.room_type}</span>
+          <span className="rounded bg-gray-50 px-2 py-1">{listing.room_type ? roomLabels[listing.room_type] ?? listing.room_type : "整套"}</span>
           <span className="rounded bg-gray-50 px-2 py-1">{listing.available_from} 可住</span>
           <span className="rounded bg-gray-50 px-2 py-1">共浴 {listing.bathroom_shared_with_count ?? 0} 人</span>
           <span className="rounded bg-gray-50 px-2 py-1">已住 {listing.current_occupants_count ?? 0} 人</span>
           <span className="rounded bg-gray-50 px-2 py-1">{listing.cooking_policy === "full" ? "可大煮" : listing.cooking_policy === "light" ? "可小煮" : listing.cooking_policy === "no" ? "不可煮" : "煮饭未说明"}</span>
           <span className="rounded bg-gray-50 px-2 py-1">{listing.landlord_staying ? "屋主同住" : "无屋主同住"}</span>
+          {listing.ntu_commute?.ntu_bus_minutes ? (
+            <span className="rounded bg-gray-50 px-2 py-1">NTU 公交 {listing.ntu_commute.ntu_bus_minutes} 分钟</span>
+          ) : null}
+          {listing.ntu_commute?.ntu_drive_minutes ? (
+            <span className="rounded bg-gray-50 px-2 py-1">NTU 驾车 {listing.ntu_commute.ntu_drive_minutes} 分钟</span>
+          ) : null}
         </div>
       </div>
     </Link>

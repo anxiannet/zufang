@@ -39,12 +39,15 @@ export async function createListing(formData: FormData) {
   const title = text(formData, "title");
   const rentAmount = intValue(formData, "rent_amount");
   const availableFrom = text(formData, "available_from");
+  const listingType = text(formData, "listing_type", "room");
+  const roomType = nullableText(formData, "room_type");
 
   const validationErrors = new URLSearchParams();
   if (!title) validationErrors.set("missing", "title");
   else if (!postalCode) validationErrors.set("missing", "postal_code");
   else if (!rentAmount) validationErrors.set("missing", "rent_amount");
   else if (!availableFrom) validationErrors.set("missing", "available_from");
+  else if (listingType !== "whole_unit" && !roomType) validationErrors.set("missing", "room_type");
 
   if (validationErrors.size > 0) {
     redirect(`/landlord/listings/new?${validationErrors.toString()}`);
@@ -59,8 +62,8 @@ export async function createListing(formData: FormData) {
       owner_id: profile.id,
       status: "pending_review",
       title,
-      listing_type: text(formData, "listing_type", "room"),
-      room_type: text(formData, "room_type", "common_room"),
+      listing_type: listingType,
+      room_type: listingType === "whole_unit" ? null : roomType,
       rent_amount: rentAmount,
       deposit_amount: intValue(formData, "deposit_amount"),
       postal_code: postalCode,
@@ -231,7 +234,7 @@ export async function searchListings(searchParams: Record<string, string | strin
   if (ids.length === 0) return listings;
 
   const postalCodes = [...new Set(listings.map((listing) => listing.postal_code).filter(Boolean))];
-  const [imagesResult, geocodingResult] = await Promise.all([
+  const [imagesResult, geocodingResult, commuteResult] = await Promise.all([
     supabase
       .from("listing_images")
       .select("listing_id,image_url,sort_order,caption")
@@ -240,6 +243,11 @@ export async function searchListings(searchParams: Record<string, string | strin
     supabase
       .from("geocoding_cache")
       .select("postal_code,block,road_name,building,property_type,latitude,longitude")
+      .in("postal_code", postalCodes)
+      .eq("status", "success"),
+    supabase
+      .from("listing_commute_cache")
+      .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,computed_at")
       .in("postal_code", postalCodes)
       .eq("status", "success")
   ]);
@@ -251,10 +259,12 @@ export async function searchListings(searchParams: Record<string, string | strin
     imagesByListing.set(image.listing_id, current);
   }
   const geocodingByPostalCode = new Map((geocodingResult.data ?? []).map((row) => [row.postal_code, row]));
+  const commuteByPostalCode = new Map((commuteResult.data ?? []).map((row) => [row.postal_code, row]));
 
   return listings.map((listing) => ({
     ...listing,
     geocoding: geocodingByPostalCode.get(listing.postal_code) ?? null,
+    ntu_commute: commuteByPostalCode.get(listing.postal_code) ?? null,
     listing_images: imagesByListing.get(listing.id) ?? []
   }));
 }
@@ -269,7 +279,7 @@ export async function getListingDetail(id: string) {
 
   if (error) return null;
 
-  const [images, facilitiesRows, nearbyRows, geocoding] = await Promise.all([
+  const [images, facilitiesRows, nearbyRows, geocoding, commute] = await Promise.all([
     supabase.from("listing_images").select("image_url,sort_order,caption").eq("listing_id", id).order("sort_order", { ascending: true }),
     supabase.from("listing_facilities").select("facility_name,availability,note").eq("listing_id", id),
     supabase.from("nearby_places_cache").select("place_type,name,distance_meters,walking_minutes").eq("listing_id", id),
@@ -278,12 +288,19 @@ export async function getListingDetail(id: string) {
       .select("block,road_name,building,property_type,latitude,longitude")
       .eq("postal_code", data.postal_code)
       .eq("status", "success")
+      .maybeSingle(),
+    supabase
+      .from("listing_commute_cache")
+      .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,computed_at")
+      .eq("postal_code", data.postal_code)
+      .eq("status", "success")
       .maybeSingle()
   ]);
 
   return {
     ...data,
     geocoding: geocoding.data ?? null,
+    ntu_commute: commute.data ?? null,
     listing_images: images.data ?? [],
     listing_facilities: facilitiesRows.data ?? [],
     nearby_places_cache: nearbyRows.data ?? []

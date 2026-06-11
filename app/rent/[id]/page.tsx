@@ -10,7 +10,8 @@ const roomLabels: Record<string, string> = {
   common_room: "普通房",
   master_room: "主人房",
   single_room: "单人间",
-  partition_room: "单人间",
+  partition_room: "隔间",
+  maid_room: "佣人房",
   studio: "Studio公寓"
 };
 
@@ -83,7 +84,9 @@ export default async function ListingDetailPage({
           <dl className="mt-4 grid gap-2 text-sm">
             <Row label="可入住" value={listing.available_from} />
             {listing.available_note ? <Row label="入住备注" value={listing.available_note} /> : null}
-            <Row label="房型" value={roomLabels[listing.room_type] ?? listing.room_type} />
+            <Row label="房间类型" value={listing.room_type ? roomLabels[listing.room_type] ?? listing.room_type : "整套不适用"} />
+            <Row label="到 NTU 公交" value={listing.ntu_commute?.ntu_bus_minutes ? `${listing.ntu_commute.ntu_bus_minutes} 分钟` : "待计算"} />
+            <Row label="到 NTU 驾车" value={listing.ntu_commute?.ntu_drive_minutes ? `${listing.ntu_commute.ntu_drive_minutes} 分钟` : "待计算"} />
             <Row label="最短租期" value={`${listing.min_lease_months} 个月`} />
           </dl>
         </div>

@@ -33,7 +33,7 @@ export function LandlordListingForm({ role }: { role: UserRole }) {
       <section className={step === 0 ? "grid gap-4 md:grid-cols-2" : "hidden"}>
           <Field name="title" label="标题" placeholder="近 Tampines MRT 普通房，可报地址" />
           <Select name="listing_type" label="房源类型" options={[["room", "单间"], ["whole_unit", "整套"], ["bedspace", "床位"]]} />
-          <Select name="room_type" label="房型" options={[["master_room", "主人房"], ["common_room", "普通房"], ["single_room", "单人间"], ["studio", "Studio公寓"]]} />
+          <Select name="room_type" label="房间类型（整套不适用；床位请选择所在房间）" emptyLabel="整套不适用 / 请选择" options={[["master_room", "主人房"], ["common_room", "普通房"], ["partition_room", "隔间"], ["maid_room", "佣人房"], ["studio", "Studio公寓"]]} />
           <Field name="rent_amount" label="租金 SGD/月" type="number" />
           <Field name="deposit_amount" label="押金 SGD" type="number" />
           <Field name="postal_code" label="邮编" placeholder="520123" />

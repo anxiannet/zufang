@@ -68,9 +68,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <div className="flex flex-wrap gap-2">
             <Link href="/admin/crawler" className="btn-secondary">采集任务</Link>
             <Link href="/admin/ingestion" className="btn-primary">管理采集数据</Link>
-            <Link href="/admin/geocoding" className="btn-primary">地理编码中心</Link>
-            <Link href="/admin/geocoding/missing" className="btn-secondary">补全缺失邮编</Link>
-            <Link href="/admin/commute" className="btn-primary">真实通勤调试</Link>
+            <Link href="/admin/listing-imports" className="btn-primary">候选房源审核</Link>
           </div>
         </div>
       </section>
@@ -78,26 +76,20 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       <section className="card p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="font-semibold text-ink">租房 Pipeline 审计</h2>
-            <p className="mt-1 text-sm text-muted">从采集、清洗、过滤、索引到搜索调试，完整排查房源为什么出现、消失或排序靠前。</p>
+            <h2 className="font-semibold text-ink">房源导入流程</h2>
+            <p className="mt-1 text-sm text-muted">原始采集数据先进入候选层，人工审核后再导入正式 listings 草稿。</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/admin/ingestion" className="btn-secondary">采集层</Link>
-            <Link href="/admin/clean-listings" className="btn-secondary">清洗层</Link>
-            <Link href="/admin/invalid-listings" className="btn-secondary">无效房源</Link>
-            <Link href="/admin/index-listings" className="btn-secondary">索引层</Link>
-            <Link href="/admin/search-debug" className="btn-primary">搜索调试</Link>
+            <Link href="/admin/listing-imports" className="btn-primary">候选审核层</Link>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-3 md:grid-cols-6">
-        <AdminNavCard href="/admin/ingestion" title="采集层" description="查看 ingestion_listings 原始抓取数据，处理新房源，重建全部索引。" />
-        <AdminNavCard href="/admin/clean-listings" title="清洗层" description="查看 listing_clean 的房型、三态字段、状态和结构化结果。" />
-        <AdminNavCard href="/admin/invalid-listings" title="无效房源" description="审计床位、搭房、日租、小时房等被过滤记录。" />
-        <AdminNavCard href="/admin/index-listings" title="索引层" description="查看 listing_indexes 的 summary、NTU 分、标签和匹配原因。" />
-        <AdminNavCard href="/admin/commute" title="真实通勤" description="查看 OneMap 通勤缓存、队列状态、失败原因并手动跑批。" />
-        <AdminNavCard href="/admin/search-debug" title="搜索调试" description="输入自然语言搜索词，查看命中结果、得分和排序原因。" />
+      <section className="grid gap-3 md:grid-cols-3">
+        <AdminNavCard href="/admin/ingestion" title="原始采集层" description="查看 ingestion_listings 原始抓取数据。" />
+        <AdminNavCard href="/admin/listing-imports" title="候选审核层" description="修正结构化字段、批准、拒绝或标记重复。" />
+        <AdminNavCard href="/rent" title="正式房源" description="查看已发布的 listings 业务数据。" />
       </section>
 
       <section className="card p-4">
