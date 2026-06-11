@@ -82,20 +82,6 @@ create index if not exists idx_listing_import_candidates_phone
 create index if not exists idx_listing_import_candidates_created_at
   on public.listing_import_candidates(created_at desc);
 
-alter table public.listings
-  add column if not exists ingestion_listing_id bigint references public.ingestion_listings(id) on delete set null,
-  add column if not exists source_site text,
-  add column if not exists source_listing_id text,
-  add column if not exists source_url text,
-  add column if not exists imported_at timestamptz;
-
-create unique index if not exists listings_ingestion_listing_id_uidx
-  on public.listings(ingestion_listing_id)
-  where ingestion_listing_id is not null;
-
-create index if not exists listings_source_trace_idx
-  on public.listings(source_site, source_listing_id);
-
 alter table public.listing_import_candidates enable row level security;
 
 revoke all on table public.listing_import_candidates from anon, authenticated;
