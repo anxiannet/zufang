@@ -64,6 +64,7 @@ export type ParsedListingCandidate = {
 
 export type ListingImportCandidate = ParsedListingCandidate & {
   id: string;
+  candidate_no: number;
   ingestion_listing_id: number;
   source: string;
   source_id: string | null;
