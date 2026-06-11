@@ -16,7 +16,7 @@ export async function getListingImportCandidates(status = "needs_review") {
   const [{ data: candidates, error }, { data: owners, error: owner_error }] = await Promise.all([
     supabase
       .from("listing_import_candidates")
-      .select("id,source,source_id,source_url,parsed_title,parsed_rent_amount,parsed_postal_code,parsed_area,parsed_mrt,parsed_listing_type,parsed_room_type,parsed_phone,parsed_wechat,parse_confidence,parse_warnings,import_status,listing_id,created_at")
+      .select("id,candidate_no,source,source_id,source_url,parsed_title,parsed_rent_amount,parsed_postal_code,parsed_area,parsed_mrt,parsed_listing_type,parsed_room_type,parsed_phone,parsed_wechat,parse_confidence,parse_warnings,import_status,listing_id,created_at")
       .eq("import_status", safe_status)
       .order("created_at", { ascending: false })
       .limit(100),
@@ -94,7 +94,7 @@ export async function setListingImportCandidateStatus(formData: FormData) {
     updated_at: now
   };
   if (status === "duplicate") {
-    update.parse_warnings = [...new Set([...(current.parse_warnings ?? []), "人工标记为重复房源"])];
+    update.parse_warnings = [...new Set([...(current.parse_warnings ?? []), "人工标记为重复房源"])] ;
   }
 
   const { error } = await supabase.from("listing_import_candidates").update(update).eq("id", id);
