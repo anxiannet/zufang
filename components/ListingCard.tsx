@@ -11,13 +11,20 @@ const roomLabels: Record<string, string> = {
   studio: "Studio公寓"
 };
 
-export function ListingCard({ listing }: { listing: ListingCardType }) {
+type CandidateListingCard = ListingCardType & { candidate_no?: number | null };
+
+function formatCandidateNo(value: number | null | undefined) {
+  return value ? `#C${String(value).padStart(4, "0")}` : "#C----";
+}
+
+export function ListingCard({ listing }: { listing: CandidateListingCard }) {
   const image = listing.listing_images?.sort((a, b) => a.sort_order - b.sort_order)[0]?.image_url;
   const address = [listing.geocoding?.building, listing.geocoding?.block ? `Blk ${listing.geocoding.block}` : null, listing.geocoding?.road_name]
     .filter(Boolean)
     .join(" · ");
   const isCandidate = listing.card_source === "candidate";
   const href = isCandidate && listing.source_url ? listing.source_url : `/rent/${listing.id}`;
+  const visibleNo = isCandidate ? formatCandidateNo(listing.candidate_no) : listing.listing_no ? `#${listing.listing_no}` : "#-----";
   const content = (
     <>
       <div className="relative aspect-[4/3] bg-gray-100">
@@ -36,7 +43,7 @@ export function ListingCard({ listing }: { listing: ListingCardType }) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="mb-1 text-xs font-semibold text-brand">
-              {listing.listing_no ? `房源编号 #${listing.listing_no}` : "网络房源 · 待授权"}
+              房源编号 {visibleNo}
             </div>
             <h3 className="line-clamp-2 font-semibold text-ink">{listing.title}</h3>
             <p className="mt-1 text-sm text-muted">
