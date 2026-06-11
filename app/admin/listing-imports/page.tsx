@@ -9,6 +9,10 @@ import { getCurrentProfile } from "@/lib/auth";
 
 const statuses = ["needs_review", "parsed", "approved", "duplicate", "rejected", "imported", "failed"];
 
+function formatCandidateNo(value: number | null | undefined) {
+  return value ? `#C${String(value).padStart(4, "0")}` : "#C----";
+}
+
 export default async function ListingImportsPage({
   searchParams
 }: {
@@ -85,6 +89,7 @@ export default async function ListingImportsPage({
           <article key={candidate.id} className="card p-4">
             <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
               <div>
+                <div className="mb-1 text-xs font-semibold text-brand">候选编号 {formatCandidateNo(candidate.candidate_no)}</div>
                 <div className="font-semibold text-ink">{candidate.parsed_title ?? "无标题"}</div>
                 <div className="mt-1 text-sm text-muted">
                   ${candidate.parsed_rent_amount ?? "-"} · 邮编 {candidate.parsed_postal_code ?? "缺失"} ·
