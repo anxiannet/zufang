@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  generateListingImportCandidates,
   getListingImportCandidates,
   importApprovedListingCandidate,
   setListingImportCandidateStatus
@@ -34,7 +35,23 @@ export default async function ListingImportsPage({
           <h1 className="mt-1 text-2xl font-bold text-ink">爬虫候选房源</h1>
           <p className="mt-1 text-sm text-muted">候选审核通过后仍以草稿、未认证、群组可见状态导入。</p>
         </div>
-        <Link href="/admin/ingestion" className="btn-secondary">查看原始采集</Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <form action={generateListingImportCandidates} className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-white p-2 shadow-sm">
+            <select name="limit" defaultValue="50" className="rounded-xl border border-line px-3 py-2 text-sm">
+              <option value="20">20 条</option>
+              <option value="50">50 条</option>
+              <option value="100">100 条</option>
+              <option value="200">200 条</option>
+            </select>
+            <input
+              name="source"
+              placeholder="来源，如 shichengbbs.com"
+              className="w-48 rounded-xl border border-line px-3 py-2 text-sm"
+            />
+            <button className="btn-primary" type="submit">从原始采集生成候选</button>
+          </form>
+          <Link href="/admin/ingestion" className="btn-secondary">查看原始采集</Link>
+        </div>
       </div>
 
       {typeof params.error === "string" ? (
@@ -42,6 +59,13 @@ export default async function ListingImportsPage({
       ) : null}
       {params.imported === "1" ? (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">候选已导入正式房源草稿。</div>
+      ) : null}
+      {params.generated === "1" ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          已从原始采集生成候选：读取 {params.fetched ?? "0"} 条，新增 {params.created ?? "0"} 条，
+          needs_review {params.review ?? "0"} 条，parsed {params.parsed ?? "0"} 条，
+          rejected {params.rejected ?? "0"} 条，duplicate {params.duplicate ?? "0"} 条，failed {params.failed ?? "0"} 条。
+        </div>
       ) : null}
 
       <nav className="flex flex-wrap gap-2">
@@ -103,7 +127,13 @@ export default async function ListingImportsPage({
             ) : null}
           </article>
         ))}
-        {candidates.length === 0 ? <div className="card p-6 text-center text-sm text-muted">当前状态暂无候选房源。</div> : null}
+        {candidates.length === 0 ? (
+          <div className="card p-6 text-center text-sm text-muted">
+            当前状态暂无候选房源。
+            <br />
+            如果原始采集表已有数据，请点击上方「从原始采集生成候选」。
+          </div>
+        ) : null}
       </section>
     </main>
   );
