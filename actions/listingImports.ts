@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { importCandidateToListing } from "@/src/import/repository";
+import { processCrawlerListings } from "@/src/import/processCrawlerListings";
 
 const allowed_statuses = new Set(["pending", "parsed", "needs_review", "approved", "rejected", "imported", "failed", "duplicate"]);
 
@@ -28,6 +29,43 @@ export async function getListingImportCandidates(status = "needs_review") {
   if (error) throw new Error(error.message);
   if (owner_error) throw new Error(owner_error.message);
   return { candidates: candidates ?? [], owners: owners ?? [], status: safe_status };
+}
+
+
+export async function generateListingImportCandidates(formData: FormData) {
+  await requireRole(["admin"]);
+
+  const rawLimit = Number.parseInt(String(formData.get("limit") ?? "50"), 10);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 200) : 50;
+  const sourceValue = String(formData.get("source") ?? "").trim();
+  const source = sourceValue.length > 0 ? sourceValue : undefined;
+
+  let summary: Awaited<ReturnType<typeof processCrawlerListings>>["summary"];
+
+  try {
+    const result = await processCrawlerListings(createAdminClient(), {
+      limit,
+      source,
+      dryRun: false
+    });
+    summary = result.summary;
+  } catch (error) {
+    redirect(`/admin/listing-imports?status=needs_review&error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
+  }
+
+  revalidatePath("/admin/listing-imports");
+  const params = new URLSearchParams({
+    status: "needs_review",
+    generated: "1",
+    fetched: String(summary.fetched),
+    created: String(summary.created_candidates),
+    parsed: String(summary.parsed),
+    review: String(summary.needs_review),
+    rejected: String(summary.rejected),
+    duplicate: String(summary.duplicate),
+    failed: String(summary.failed)
+  });
+  redirect(`/admin/listing-imports?${params.toString()}`);
 }
 
 export async function setListingImportCandidateStatus(formData: FormData) {
