@@ -97,45 +97,16 @@ export async function detectDuplicateCandidate(
     source_url: string | null;
   }
 ): Promise<{ duplicate: boolean; listing_id?: string; reason?: string }> {
-  const { data: ingestion_match, error: ingestion_error } = await supabase
-    .from("listings")
-    .select("id")
-    .eq("ingestion_listing_id", candidate.ingestion_listing_id)
-    .limit(1);
-  if (ingestion_error) throw new Error(ingestion_error.message);
-  if (ingestion_match?.[0]) return { duplicate: true, listing_id: ingestion_match[0].id, reason: "同一采集记录已导入" };
-
-  if (candidate.source_id) {
+  if (candidate.parsed_phone && candidate.parsed_rent_amount && candidate.parsed_postal_code) {
     const { data, error } = await supabase
       .from("listings")
-      .select("id")
-      .eq("source_site", candidate.source)
-      .eq("source_listing_id", candidate.source_id)
-      .limit(1);
-    if (error) throw new Error(error.message);
-    if (data?.[0]) return { duplicate: true, listing_id: data[0].id, reason: "来源编号已存在" };
-  }
-
-  if (candidate.source_url) {
-    const { data, error } = await supabase.from("listings").select("id").eq("source_url", candidate.source_url).limit(1);
-    if (error) throw new Error(error.message);
-    if (data?.[0]) return { duplicate: true, listing_id: data[0].id, reason: "来源链接已存在" };
-  }
-
-  if (candidate.parsed_phone && candidate.parsed_rent_amount) {
-    let query = supabase
-      .from("listings")
-      .select("id,postal_code,source_url")
+      .select("id,postal_code")
       .eq("phone", candidate.parsed_phone)
       .eq("rent_amount", candidate.parsed_rent_amount)
-      .limit(10);
-    const { data, error } = await query;
+      .eq("postal_code", candidate.parsed_postal_code)
+      .limit(1);
     if (error) throw new Error(error.message);
-    const match = data?.find((row) =>
-      (candidate.parsed_postal_code && row.postal_code === candidate.parsed_postal_code)
-      || (candidate.source_url && row.source_url === candidate.source_url)
-    );
-    if (match) return { duplicate: true, listing_id: match.id, reason: "电话、租金及地址信息疑似重复" };
+    if (data?.[0]) return { duplicate: true, listing_id: data[0].id, reason: "电话、租金及邮编疑似重复" };
   }
 
   return { duplicate: false };
@@ -203,13 +174,7 @@ export async function importCandidateToListing(
   }
 
   const now = new Date().toISOString();
-  const internal_note = [
-    "自动导入",
-    `原始来源=${candidate.source}`,
-    `source_id=${candidate.source_id ?? ""}`,
-    `url=${candidate.source_url ?? ""}`,
-    `warnings=${(candidate.parse_warnings ?? []).join("；")}`
-  ].join("；");
+  const internal_note = "由候选房源人工联系并确认授权后录入正式房源表";
 
   const { data: listing, error: listing_error } = await supabase
     .from("listings")
@@ -235,7 +200,7 @@ export async function importCandidateToListing(
       bathroom_shared_with_count: candidate.parsed_bathroom_shared_with_count,
       description: candidate.parsed_description,
       description_clean: candidate.parsed_description_clean,
-      source: "zufang",
+      source: "manual",
       contact_visibility: "group_only",
       wechat: candidate.parsed_wechat,
       phone: candidate.parsed_phone,
@@ -251,12 +216,7 @@ export async function importCandidateToListing(
       pets_policy: candidate.parsed_pets_policy,
       tenant_type_preference: candidate.parsed_tenant_type_preference ?? [],
       available_note: candidate.parsed_available_note,
-      internal_note,
-      ingestion_listing_id: candidate.ingestion_listing_id,
-      source_site: candidate.source,
-      source_listing_id: candidate.source_id,
-      source_url: candidate.source_url,
-      imported_at: now
+      internal_note
     })
     .select("id")
     .single();
