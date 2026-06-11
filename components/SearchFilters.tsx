@@ -8,10 +8,10 @@ export function SearchFilters({ searchParams }: { searchParams: Record<string, s
       <div className="grid gap-3 md:grid-cols-4">
         <div className="md:col-span-2">
           <label htmlFor="q">关键词</label>
-          <input id="q" name="q" defaultValue={value("q")} placeholder="主人房、近 MRT、可报地址" />
+          <input id="q" name="q" defaultValue={value("q")} placeholder="房源编号、UUID、标题或描述" />
         </div>
         <div>
-          <label htmlFor="location">地区 / MRT / 邮编</label>
+          <label htmlFor="location">地址 / 邮编</label>
           <input id="location" name="location" defaultValue={value("location")} placeholder="Tampines / 520123" />
         </div>
         <div>
@@ -19,7 +19,6 @@ export function SearchFilters({ searchParams }: { searchParams: Record<string, s
           <select id="sort" name="sort" defaultValue={value("sort") || "latest"}>
             <option value="latest">最新</option>
             <option value="price_asc">租金低到高</option>
-            <option value="mrt_near">离 MRT 近</option>
             <option value="available_soon">可入住日期近</option>
           </select>
         </div>

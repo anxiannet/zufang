@@ -1,4 +1,4 @@
-import { appointAdmin, publishListing, rejectListing, unpublishListing, getAdminDashboard } from "@/actions/admin";
+import { appointAdmin, publishListing, rejectListing, unpublishListing, updateListingModeration, getAdminDashboard } from "@/actions/admin";
 import { getCurrentProfile } from "@/lib/auth";
 import { formatSingaporeDate } from "@/lib/dateTime";
 import Link from "next/link";
@@ -106,8 +106,30 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           {dashboard.pending.map((listing: any) => (
             <div key={listing.id} className="grid gap-3 rounded-md border border-line p-3 md:grid-cols-[1fr_auto]">
               <div>
-                <div className="font-semibold">{listing.title}</div>
-                <div className="text-sm text-muted">${listing.rent_amount} · {listing.street_name ?? listing.postal_code} · 图片 {listing.listing_images?.length ?? 0} 张</div>
+                <div className="font-semibold">#{listing.listing_no} · {listing.title}</div>
+                <div className="text-sm text-muted">${listing.rent_amount} · 邮编 {listing.postal_code} · 图片 {listing.listing_images?.length ?? 0} 张</div>
+                <div className="mt-1 text-xs text-muted">
+                  来源 {listing.source} · 认证 {listing.verification_status} ·
+                  {listing.is_owner_direct ? " 屋主直租" : ""}{listing.is_agent ? " 中介" : ""}{listing.is_sublet ? " 转租" : ""}
+                </div>
+                <form action={updateListingModeration} className="mt-3 grid gap-2 md:grid-cols-3">
+                  <input type="hidden" name="listing_id" value={listing.id} />
+                  <select name="verification_status" defaultValue={listing.verification_status}>
+                    <option value="unverified">未认证</option>
+                    <option value="owner_verified">屋主已认证</option>
+                    <option value="agent_verified">中介已认证</option>
+                    <option value="suspicious">可疑</option>
+                    <option value="rejected">拒绝</option>
+                  </select>
+                  <select name="contact_visibility" defaultValue={listing.contact_visibility}>
+                    <option value="private">不公开</option>
+                    <option value="login_only">登录后可见</option>
+                    <option value="group_only">指定群体可见</option>
+                    <option value="public">公开</option>
+                  </select>
+                  <input name="internal_note" defaultValue={listing.internal_note ?? ""} placeholder="内部备注（仅管理员）" />
+                  <button className="btn-secondary md:col-span-3" type="submit">保存审核信息</button>
+                </form>
               </div>
               <div className="flex flex-wrap gap-2">
                 <form action={publishListing.bind(null, listing.id)}>
@@ -153,8 +175,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         <div className="grid gap-2 md:grid-cols-2">
           {dashboard.anomalies.map((listing: any) => (
             <div key={listing.id} className="rounded-md border border-line p-3 text-sm">
-              <div className="font-semibold">{listing.title}</div>
-              <div className="text-muted">租金 ${listing.rent_amount} · 图片 {listing.listing_images?.length ?? 0} 张 · 地址 {listing.street_name ?? "不完整"}</div>
+              <div className="font-semibold">#{listing.listing_no} · {listing.title}</div>
+              <div className="text-muted">租金 ${listing.rent_amount} · 图片 {listing.listing_images?.length ?? 0} 张 · 邮编 {listing.postal_code ?? "不完整"}</div>
+              <div className="text-xs text-muted">来源 {listing.source} · 认证 {listing.verification_status}</div>
             </div>
           ))}
         </div>

@@ -46,7 +46,7 @@ export default async function NewListingPage({ searchParams }: { searchParams: P
           {params.error === "listing_role" ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">当前账号角色不能发布房源。</div>
           ) : null}
-          <LandlordListingForm />
+          <LandlordListingForm role={profile.role} />
         </>
       )}
     </div>

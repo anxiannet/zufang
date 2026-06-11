@@ -153,7 +153,7 @@ function buildTags(listing: NtuListing) {
 
   const dbTags = [...(listing.tags ?? []), ...(listing.amenities ?? [])]
     .map((tag) => normalizeTag(tag))
-    .filter((tag): tag is string => Boolean(tag) && tag.length <= 12);
+    .filter((tag): tag is string => tag !== null && tag.length <= 12);
 
   return Array.from(new Set([...baseTags, ...dbTags].filter(Boolean) as string[])).slice(0, 8);
 }

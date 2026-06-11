@@ -12,6 +12,9 @@ const roomLabels: Record<string, string> = {
 
 export function ListingCard({ listing }: { listing: ListingCardType }) {
   const image = listing.listing_images?.sort((a, b) => a.sort_order - b.sort_order)[0]?.image_url;
+  const address = [listing.geocoding?.building, listing.geocoding?.block ? `Blk ${listing.geocoding.block}` : null, listing.geocoding?.road_name]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <Link href={`/rent/${listing.id}`} className="card block overflow-hidden transition hover:-translate-y-0.5 hover:shadow-sm">
@@ -25,9 +28,10 @@ export function ListingCard({ listing }: { listing: ListingCardType }) {
       <div className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
+            <div className="mb-1 text-xs font-semibold text-brand">房源编号 #{listing.listing_no}</div>
             <h3 className="line-clamp-2 font-semibold text-ink">{listing.title}</h3>
             <p className="mt-1 text-sm text-muted">
-              {listing.street_name ?? listing.postal_code} · {listing.nearest_mrt ?? "MRT 待补充"}
+              {address || `邮编 ${listing.postal_code}`}
             </p>
           </div>
           <div className="text-right">
@@ -40,7 +44,7 @@ export function ListingCard({ listing }: { listing: ListingCardType }) {
           <span className="rounded bg-gray-50 px-2 py-1">{listing.available_from} 可住</span>
           <span className="rounded bg-gray-50 px-2 py-1">共浴 {listing.bathroom_shared_with_count ?? 0} 人</span>
           <span className="rounded bg-gray-50 px-2 py-1">已住 {listing.current_occupants_count ?? 0} 人</span>
-          <span className="rounded bg-gray-50 px-2 py-1">{listing.cooking_allowed ? "可煮" : "不可煮"}</span>
+          <span className="rounded bg-gray-50 px-2 py-1">{listing.cooking_policy === "full" ? "可大煮" : listing.cooking_policy === "light" ? "可小煮" : listing.cooking_policy === "no" ? "不可煮" : "煮饭未说明"}</span>
           <span className="rounded bg-gray-50 px-2 py-1">{listing.landlord_staying ? "屋主同住" : "无屋主同住"}</span>
         </div>
       </div>

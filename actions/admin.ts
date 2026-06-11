@@ -41,6 +41,23 @@ export async function unpublishListing(listingId: string) {
   revalidatePath("/rent");
 }
 
+export async function updateListingModeration(formData: FormData) {
+  await requireRole(["admin"]);
+  const supabase = await createClient();
+  const listingId = String(formData.get("listing_id") ?? "");
+  const { error } = await supabase
+    .from("listings")
+    .update({
+      verification_status: String(formData.get("verification_status") ?? "unverified"),
+      contact_visibility: String(formData.get("contact_visibility") ?? "private"),
+      internal_note: String(formData.get("internal_note") ?? "").trim() || null
+    })
+    .eq("id", listingId);
+
+  if (error) throw new Error(error.message);
+  revalidatePath("/admin");
+}
+
 export async function appointAdmin(formData: FormData) {
   await requireRole(["admin"]);
 
@@ -103,13 +120,17 @@ export async function getAdminDashboard() {
   const supabase = await createClient();
 
   const [pending, users, enquiries, anomalies] = await Promise.all([
-    supabase.from("listings").select("id,title,rent_amount,postal_code,street_name,created_at").eq("status", "pending_review").order("created_at", { ascending: false }),
+    supabase
+      .from("listings")
+      .select("id,listing_no,title,rent_amount,postal_code,source,verification_status,contact_visibility,is_owner_direct,is_agent,is_sublet,internal_note,created_at")
+      .eq("status", "pending_review")
+      .order("created_at", { ascending: false }),
     supabase.from("users_profile").select("id,display_name,role,phone,whatsapp,wechat,created_at").order("created_at", { ascending: false }).limit(80),
     supabase.from("enquiries").select("id,message,status,created_at,listing_id,tenant_id").order("created_at", { ascending: false }).limit(80),
     supabase
       .from("listings")
-      .select("id,title,rent_amount,postal_code,street_name")
-      .or("rent_amount.lt.400,rent_amount.gt.10000,postal_code.is.null,street_name.is.null")
+      .select("id,listing_no,title,rent_amount,postal_code,source,verification_status,is_owner_direct,is_agent,is_sublet")
+      .or("rent_amount.lt.400,rent_amount.gt.10000,postal_code.is.null")
       .limit(80)
   ]);
 
@@ -127,7 +148,7 @@ export async function getAdminDashboard() {
     pending: withImageCounts(pending.data ?? []),
     users: users.data ?? [],
     enquiries: enquiries.data ?? [],
-    anomalies: withImageCounts(anomalies.data ?? []).filter((listing: any) => !listing.listing_images?.length || listing.rent_amount < 400 || listing.rent_amount > 10000 || !listing.street_name)
+    anomalies: withImageCounts(anomalies.data ?? []).filter((listing: any) => !listing.listing_images?.length || listing.rent_amount < 400 || listing.rent_amount > 10000 || !listing.postal_code)
   };
 }
 

@@ -14,6 +14,22 @@ const roomLabels: Record<string, string> = {
   studio: "Studio公寓"
 };
 
+const policyLabels: Record<string, string> = {
+  included: "包含",
+  shared: "均摊",
+  excluded: "不包含",
+  capped: "限额包含",
+  extra_charge: "额外收费",
+  limited_hours: "限时使用",
+  not_available: "不可用",
+  full: "可大煮",
+  light: "可小煮",
+  no: "不可煮",
+  allowed: "允许",
+  limited: "有限制",
+  not_allowed: "不允许"
+};
+
 export default async function ListingDetailPage({
   params,
   searchParams
@@ -30,6 +46,13 @@ export default async function ListingDetailPage({
   const images = listing.listing_images?.sort((a, b) => a.sort_order - b.sort_order) ?? [];
   const facilities = listing.listing_facilities ?? [];
   const byAvailability = (availability: string) => facilities.filter((item) => item.availability === availability);
+  const address = [
+    listing.geocoding?.building,
+    listing.geocoding?.block ? `Blk ${listing.geocoding.block}` : null,
+    listing.geocoding?.road_name,
+    listing.postal_code
+  ].filter(Boolean).join(" · ");
+  const canShowContact = listing.contact_visibility === "public" || (listing.contact_visibility === "login_only" && Boolean(profile));
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 px-4 py-6">
@@ -48,15 +71,18 @@ export default async function ListingDetailPage({
 
       <section className="card grid gap-4 p-4 md:grid-cols-[1fr_280px]">
         <div>
+          <div className="mb-2 text-sm font-semibold text-brand">房源编号：{listing.listing_no}</div>
           <h1 className="text-2xl font-bold text-ink">{listing.title}</h1>
-          <p className="mt-2 text-muted">{listing.street_name ?? listing.postal_code} · 最近 MRT：{listing.nearest_mrt ?? "待补充"}</p>
-          <p className="mt-4 whitespace-pre-line text-sm leading-6 text-ink">{listing.description}</p>
+          <p className="mt-2 text-muted">{address || `邮编 ${listing.postal_code}`}</p>
+          {listing.geocoding?.property_type && listing.geocoding.property_type !== "unknown" ? <p className="mt-1 text-sm text-muted">物业类型：{listing.geocoding.property_type}</p> : null}
+          <p className="mt-4 whitespace-pre-line text-sm leading-6 text-ink">{listing.description_clean || listing.description}</p>
         </div>
         <div className="rounded-lg bg-teal-50 p-4">
           <div className="text-3xl font-bold text-brand">${listing.rent_amount}</div>
-          <div className="text-sm text-muted">{listing.currency}/月 · 押金 ${listing.deposit_amount ?? 0}</div>
+          <div className="text-sm text-muted">新加坡元/月 · 押金：${listing.deposit_amount ?? 0}</div>
           <dl className="mt-4 grid gap-2 text-sm">
             <Row label="可入住" value={listing.available_from} />
+            {listing.available_note ? <Row label="入住备注" value={listing.available_note} /> : null}
             <Row label="房型" value={roomLabels[listing.room_type] ?? listing.room_type} />
             <Row label="最短租期" value={`${listing.min_lease_months} 个月`} />
           </dl>
@@ -72,13 +98,15 @@ export default async function ListingDetailPage({
           <Row label="屋主同住" value={listing.landlord_staying ? "是" : "否"} />
         </Panel>
         <Panel title="规则">
-          <Row label="可煮" value={listing.cooking_allowed ? "是" : "否"} />
+          <Row label="水电" value={policyLabel(listing.utilities_policy)} />
+          <Row label="空调" value={policyLabel(listing.aircon_policy)} />
+          <Row label="煮饭" value={policyLabel(listing.cooking_policy)} />
           <Row label="可报地址" value={listing.registration_allowed ? "是" : "否"} />
-          <Row label="禁烟" value={listing.smoking_allowed ? "允许吸烟" : "禁烟"} />
-          <Row label="访客" value={listing.visitors_allowed ? "允许" : "不允许"} />
-          <Row label="宠物" value={listing.pets_allowed ? "允许" : "不允许"} />
+          <Row label="吸烟" value={policyLabel(listing.smoking_policy)} />
+          <Row label="访客" value={policyLabel(listing.visitors_policy)} />
+          <Row label="宠物" value={policyLabel(listing.pets_policy)} />
           <Row label="性别偏好" value={listing.gender_preference === "any" ? "不限" : listing.gender_preference} />
-          {listing.house_rules ? <p className="mt-3 whitespace-pre-line text-sm text-muted">{listing.house_rules}</p> : null}
+          <Row label="租客偏好" value={listing.tenant_type_preference.length ? listing.tenant_type_preference.join("、") : "不限"} />
         </Panel>
       </section>
 
@@ -125,13 +153,18 @@ export default async function ListingDetailPage({
             </div>
           )}
           <div className="mt-4 space-y-2 text-sm text-muted">
-            {listing.users_profile?.whatsapp ? <a className="btn-secondary w-full" href={`https://wa.me/${listing.users_profile.whatsapp}`} target="_blank">WhatsApp 联系</a> : null}
-            {listing.users_profile?.wechat ? <div>微信：<span className="font-semibold text-ink">{listing.users_profile.wechat}</span></div> : null}
+            {canShowContact && listing.phone ? <a className="btn-secondary w-full" href={`tel:${listing.phone}`}>电话联系：{listing.phone}</a> : null}
+            {canShowContact && listing.wechat ? <div>微信：<span className="font-semibold text-ink">{listing.wechat}</span></div> : null}
+            {!canShowContact ? <div>联系方式当前为非公开，请通过站内咨询联系。</div> : null}
           </div>
         </Panel>
       </section>
     </div>
   );
+}
+
+function policyLabel(value: string | null) {
+  return value ? policyLabels[value] ?? value : "未说明";
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
