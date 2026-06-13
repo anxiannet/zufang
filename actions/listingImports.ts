@@ -7,7 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { importCandidateToListing } from "@/src/import/repository";
 import { processCrawlerListings } from "@/src/import/processCrawlerListings";
 
-const allowed_statuses = new Set(["pending", "parsed", "needs_review", "approved", "rejected", "imported", "failed", "duplicate"]);
+const allowed_statuses = new Set(["pending", "parsed", "needs_review", "rejected", "imported", "failed", "duplicate"]);
 
 export async function getListingImportCandidates(status = "needs_review") {
   await requireRole(["admin"]);
@@ -30,7 +30,6 @@ export async function getListingImportCandidates(status = "needs_review") {
   if (owner_error) throw new Error(owner_error.message);
   return { candidates: candidates ?? [], owners: owners ?? [], status: safe_status };
 }
-
 
 export async function generateListingImportCandidates(formData: FormData) {
   await requireRole(["admin"]);
@@ -72,7 +71,7 @@ export async function setListingImportCandidateStatus(formData: FormData) {
   const profile = await requireRole(["admin"]);
   const id = String(formData.get("candidate_id") ?? "");
   const status = String(formData.get("status") ?? "");
-  if (!id || !["approved", "rejected", "duplicate"].includes(status)) {
+  if (!id || !["parsed", "rejected", "duplicate"].includes(status)) {
     redirect("/admin/listing-imports?error=invalid_status");
   }
 
@@ -100,14 +99,16 @@ export async function setListingImportCandidateStatus(formData: FormData) {
   const { error } = await supabase.from("listing_import_candidates").update(update).eq("id", id);
   if (error) redirect(`/admin/listing-imports?error=${encodeURIComponent(error.message)}`);
   revalidatePath("/admin/listing-imports");
+  revalidatePath("/rent");
 }
 
-export async function importApprovedListingCandidate(formData: FormData) {
+export async function importListingCandidate(formData: FormData) {
   const profile = await requireRole(["admin"]);
   const candidate_id = String(formData.get("candidate_id") ?? "");
   const system_owner_id = String(formData.get("system_owner_id") ?? "");
+  const status = String(formData.get("status") ?? "needs_review");
   if (!candidate_id || !system_owner_id) {
-    redirect("/admin/listing-imports?status=approved&error=missing_owner");
+    redirect(`/admin/listing-imports?status=${status}&error=missing_owner`);
   }
 
   try {
@@ -116,10 +117,11 @@ export async function importApprovedListingCandidate(formData: FormData) {
       systemOwnerId: system_owner_id
     });
   } catch (error) {
-    redirect(`/admin/listing-imports?status=approved&error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
+    redirect(`/admin/listing-imports?status=${status}&error=${encodeURIComponent(error instanceof Error ? error.message : String(error))}`);
   }
 
   revalidatePath("/admin/listing-imports");
   revalidatePath("/admin");
-  redirect("/admin/listing-imports?status=approved&imported=1");
+  revalidatePath("/rent");
+  redirect(`/admin/listing-imports?status=${status}&imported=1`);
 }
