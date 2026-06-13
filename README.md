@@ -74,8 +74,29 @@ CRON_SECRET=
 
 - `ntu_bus_minutes`
 - `ntu_drive_minutes`
+- `ntu_straight_distance_km`
 
-新房源写入或修改邮编时会自动创建 `pending` 缓存记录，再由 `enrich:ntu-commute` 调用 OneMap 补齐。
+批处理只读取已发布房源和 `geocoding_cache.status = success` 的经纬度。它先计算到 NTU
+中心点的 Haversine 直线距离：8km 内优先调用 OneMap，8-12km 低优先级调用，12km
+外写入 `skipped_far`，不调用 OneMap。相同坐标下 30 天内的成功或远距离缓存不会重复计算。
+
+```bash
+npm run enrich:ntu-commute -- --limit 50
+npm run enrich:ntu-commute -- --postal-code 640975
+npm run enrich:ntu-commute -- --postal-code 640975 --force
+npm run enrich:ntu-commute -- --limit 50 --dry-run
+```
+
+`--force` 只存在于服务端脚本中，可强制计算单个远距离邮编。`--dry-run` 只输出计划，
+不写数据库，也不调用 OneMap。单次批处理硬限制为最多 50 个唯一邮编，并输出：
+
+- `scanned_count`
+- `inserted_or_updated_cache_count`
+- `skipped_recent_cache_count`
+- `skipped_far_count`
+- `onemap_called_count`
+- `success_count`
+- `failed_count`
 
 Vercel Cron 每天新加坡时间 04:30 调用 `/api/cron/enrich-ntu-commute`。该接口要求
 `Authorization: Bearer <CRON_SECRET>`，默认每次处理 10 个邮编。

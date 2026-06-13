@@ -3,7 +3,7 @@ import Link from "next/link";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "狮城租房 MVP",
+  title: "NTU租房数据库",
   description: "面向新加坡华人的租房发布、搜索和审核平台"
 };
 
@@ -14,7 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="sticky top-0 z-20 border-b border-line bg-white/95 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
             <Link href="/rent" className="text-lg font-bold text-ink">
-              狮城租房
+              NTU租房数据库
             </Link>
             <nav className="flex items-center gap-3 text-sm font-medium text-muted">
               <Link href="/rent" className="hover:text-ink">找房</Link>

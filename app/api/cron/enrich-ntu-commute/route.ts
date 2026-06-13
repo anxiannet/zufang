@@ -14,10 +14,11 @@ export async function GET(request: Request) {
   try {
     const limit = Math.min(
       Math.max(Number.parseInt(process.env.NTU_COMMUTE_ENRICHMENT_LIMIT ?? "10", 10) || 10, 1),
-      100
+      50
     );
     const result = await enrichNtuCommuteCache(createAdminClient(), { limit });
-    return NextResponse.json(result, { status: result.failed > 0 ? 207 : 200 });
+    console.info("NTU commute enrichment", result);
+    return NextResponse.json(result, { status: result.failed_count > 0 ? 207 : 200 });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },

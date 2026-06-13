@@ -127,7 +127,7 @@ export function LandlordListingForm({ role }: { role: UserRole }) {
       </section>
 
       <section className={step === 4 ? "space-y-3" : "hidden"}>
-          <p className="text-sm text-muted">MVP 支持先填写已上传图片 URL；提交后也可通过 uploadListingImage action 接入 Supabase Storage 上传。</p>
+          <p className="text-sm text-muted">支持先填写已上传图片 URL；提交后也可通过 uploadListingImage action 接入 Supabase Storage 上传。</p>
           {imageRows.map((row, index) => (
             <div key={row} className="grid gap-2 rounded-md border border-line p-3 md:grid-cols-[1fr_100px_1fr]">
               <input name="image_url" placeholder="Supabase Storage public URL" />

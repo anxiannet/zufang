@@ -123,7 +123,7 @@ function parseRent(listPrice: number | null | undefined, text: string, warnings:
 }
 
 function parseMoneyAfter(text: string, label: RegExp): number | null {
-  const match = text.match(new RegExp(`${label.source}\\s*[:：]?\\s*(?:S\\$|SGD|\\$)?\\s*([\\d,]+)`, "i"));
+  const match = text.match(new RegExp(`(?:${label.source})\\s*[:：]?\\s*(?:S\\$|SGD|\\$)?\\s*([\\d,]+)`, "i"));
   return match ? Number.parseInt(match[1].replace(/,/g, ""), 10) : null;
 }
 

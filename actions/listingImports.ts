@@ -8,6 +8,13 @@ import { importCandidateToListing } from "@/src/import/repository";
 import { processCrawlerListings } from "@/src/import/processCrawlerListings";
 
 const allowed_statuses = new Set(["pending", "parsed", "needs_review", "approved", "rejected", "imported", "failed", "duplicate"]);
+const listing_types = new Set(["room", "whole_unit", "student_apartment", "bedspace"]);
+const room_types = new Set(["common_room", "master_room", "studio", "whole_unit", "partition_room", "maid_room"]);
+const utilities_policies = new Set(["included", "shared", "excluded", "capped"]);
+const aircon_policies = new Set(["included", "extra_charge", "limited_hours", "not_available"]);
+const cooking_policies = new Set(["full", "light", "no"]);
+const visitors_policies = new Set(["allowed", "limited", "not_allowed"]);
+const binary_policies = new Set(["allowed", "not_allowed"]);
 
 export async function getListingImportCandidates(status = "needs_review") {
   await requireRole(["admin"]);
@@ -29,6 +36,77 @@ export async function getListingImportCandidates(status = "needs_review") {
   if (error) throw new Error(error.message);
   if (owner_error) throw new Error(owner_error.message);
   return { candidates: candidates ?? [], owners: owners ?? [], status: safe_status };
+}
+
+export async function getListingImportCandidateDetail(id: string) {
+  await requireRole(["admin"]);
+  const supabase = createAdminClient();
+  const { data: candidate, error } = await supabase
+    .from("listing_import_candidates")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!candidate) return null;
+
+  const { data: ingestion, error: ingestion_error } = await supabase
+    .from("ingestion_listings")
+    .select("*")
+    .eq("id", candidate.ingestion_listing_id)
+    .maybeSingle();
+  if (ingestion_error) throw new Error(ingestion_error.message);
+
+  return { candidate, ingestion };
+}
+
+export async function updateListingImportCandidate(candidate_id: string, formData: FormData) {
+  const profile = await requireRole(["admin"]);
+  const supabase = createAdminClient();
+  const { data: current, error: read_error } = await supabase
+    .from("listing_import_candidates")
+    .select("import_status")
+    .eq("id", candidate_id)
+    .maybeSingle();
+
+  if (read_error || !current) {
+    redirect(`/admin/listing-imports/${candidate_id}?error=${encodeURIComponent(read_error?.message ?? "candidate_not_found")}`);
+  }
+  if (current.import_status === "imported") {
+    redirect(`/admin/listing-imports/${candidate_id}?error=imported_candidate_is_read_only`);
+  }
+
+  const update = {
+    parsed_title: nullableFormText(formData, "parsed_title"),
+    parsed_rent_amount: nullableFormInteger(formData, "parsed_rent_amount"),
+    parsed_postal_code: nullableFormText(formData, "parsed_postal_code"),
+    parsed_room_type: nullableEnum(formData, "parsed_room_type", room_types),
+    parsed_listing_type: nullableEnum(formData, "parsed_listing_type", listing_types),
+    parsed_available_from: nullableFormText(formData, "parsed_available_from"),
+    parsed_min_lease_months: nullableFormInteger(formData, "parsed_min_lease_months"),
+    parsed_max_occupants: nullableFormInteger(formData, "parsed_max_occupants"),
+    parsed_phone: nullableFormText(formData, "parsed_phone"),
+    parsed_wechat: nullableFormText(formData, "parsed_wechat"),
+    parsed_registration_allowed: nullableFormBoolean(formData, "parsed_registration_allowed"),
+    parsed_landlord_staying: nullableFormBoolean(formData, "parsed_landlord_staying"),
+    parsed_utilities_policy: nullableEnum(formData, "parsed_utilities_policy", utilities_policies),
+    parsed_aircon_policy: nullableEnum(formData, "parsed_aircon_policy", aircon_policies),
+    parsed_cooking_policy: nullableEnum(formData, "parsed_cooking_policy", cooking_policies),
+    parsed_visitors_policy: nullableEnum(formData, "parsed_visitors_policy", visitors_policies),
+    parsed_smoking_policy: nullableEnum(formData, "parsed_smoking_policy", binary_policies),
+    parsed_pets_policy: nullableEnum(formData, "parsed_pets_policy", binary_policies),
+    reviewed_by: profile.id,
+    reviewed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  const { error } = await supabase.from("listing_import_candidates").update(update).eq("id", candidate_id);
+  if (error) {
+    redirect(`/admin/listing-imports/${candidate_id}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/admin/listing-imports");
+  revalidatePath(`/admin/listing-imports/${candidate_id}`);
+  redirect(`/admin/listing-imports/${candidate_id}?saved=1`);
 }
 
 
@@ -122,4 +200,28 @@ export async function importApprovedListingCandidate(formData: FormData) {
   revalidatePath("/admin/listing-imports");
   revalidatePath("/admin");
   redirect("/admin/listing-imports?status=approved&imported=1");
+}
+
+function nullableFormText(formData: FormData, key: string): string | null {
+  const value = String(formData.get(key) ?? "").trim();
+  return value || null;
+}
+
+function nullableFormInteger(formData: FormData, key: string): number | null {
+  const value = nullableFormText(formData, key);
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function nullableFormBoolean(formData: FormData, key: string): boolean | null {
+  const value = nullableFormText(formData, key);
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
+}
+
+function nullableEnum(formData: FormData, key: string, allowed: Set<string>): string | null {
+  const value = nullableFormText(formData, key);
+  return value && allowed.has(value) ? value : null;
 }

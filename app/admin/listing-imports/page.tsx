@@ -108,6 +108,7 @@ export default async function ListingImportsPage({
               </div>
 
               <div className="flex flex-wrap items-start gap-2">
+                <Link href={`/admin/listing-imports/${candidate.id}`} className="btn-secondary">详情编辑</Link>
                 {candidate.import_status !== "imported" ? (
                   <>
                     <StatusButton candidateId={candidate.id} status="approved" label="批准" />

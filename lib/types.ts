@@ -58,12 +58,16 @@ export type NtuCommuteCache = {
   postal_code: string;
   ntu_bus_minutes: number | null;
   ntu_drive_minutes: number | null;
+  ntu_straight_distance_km: number | null;
+  status: "pending" | "processing" | "success" | "failed" | "skipped_far";
+  skip_reason: string | null;
   computed_at: string | null;
 };
 
 export type ListingCard = {
   id: string;
   listing_no: number | null;
+  candidate_no?: number | null;
   title: string;
   rent_amount: number;
   room_type: string | null;
@@ -78,11 +82,11 @@ export type ListingCard = {
   current_occupants_count: number | null;
   description: string | null;
   description_clean: string | null;
+  updated_at: string;
   geocoding: ListingGeocoding | null;
   ntu_commute: NtuCommuteCache | null;
   listing_images?: { image_url: string; sort_order: number; caption: string | null }[];
   card_source?: "official" | "candidate";
-  source_label?: string;
   source_url?: string | null;
 };
 

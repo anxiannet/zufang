@@ -3,8 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { facilities, type FacilityAvailability, type ListingCard, type ListingDetail } from "@/lib/types";
+
+function parseCandidateNo(value: string): number | null {
+  const match = value.trim().match(/^C(\d{1,4})$/i);
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isInteger(n) && n >= 1 && n <= 9999 ? n : null;
+}
 
 function text(formData: FormData, key: string, fallback = "") {
   return String(formData.get(key) ?? fallback).trim();
@@ -157,18 +165,108 @@ export async function submitListingForReview(listingId: string) {
   revalidatePath("/admin");
 }
 
+export async function getHomeListings() {
+  const supabase = await createClient();
+  const adminSupabase = createAdminClient();
+  const [{ data, error }, candidateListings] = await Promise.all([
+    supabase
+      .from("listings")
+      .select("id,listing_no,title,rent_amount,room_type,postal_code,available_from,available_note,min_lease_months,cooking_policy,registration_allowed,landlord_staying,bathroom_shared_with_count,current_occupants_count,description,description_clean,updated_at")
+      .eq("status", "published")
+      .order("updated_at", { ascending: false })
+      .limit(6),
+    searchCandidateListings(adminSupabase, {}, "", null, "", [], 6)
+  ]);
+
+  if (error) throw new Error(error.message);
+
+  const officialListings = ((data ?? []) as ListingCard[]).map((listing) => ({
+    ...listing,
+    card_source: "official" as const
+  }));
+  const officialIds = officialListings.map((listing) => listing.id);
+  const postalCodes = [...new Set(
+    [...officialListings, ...candidateListings]
+      .map((listing) => listing.postal_code)
+      .filter(Boolean)
+  )] as string[];
+
+  const [imagesResult, geocodingResult, commuteResult] = await Promise.all([
+    officialIds.length > 0
+      ? supabase
+        .from("listing_images")
+        .select("listing_id,image_url,sort_order,caption")
+        .in("listing_id", officialIds)
+        .order("sort_order", { ascending: true })
+      : Promise.resolve({ data: [] as { listing_id: string; image_url: string; sort_order: number; caption: string | null }[] }),
+    postalCodes.length > 0
+      ? supabase
+        .from("geocoding_cache")
+        .select("postal_code,block,road_name,building,property_type,latitude,longitude")
+        .in("postal_code", postalCodes)
+        .eq("status", "success")
+      : Promise.resolve({ data: [] as { postal_code: string; block: string | null; road_name: string | null; building: string | null; property_type: string | null; latitude: number | null; longitude: number | null }[] }),
+    postalCodes.length > 0
+      ? adminSupabase
+        .from("listing_commute_cache")
+        .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,ntu_straight_distance_km,status,skip_reason,computed_at")
+        .in("postal_code", postalCodes)
+      : Promise.resolve({ data: [] as NonNullable<ListingCard["ntu_commute"]>[] })
+  ]);
+
+  const imagesByListing = new Map<string, { image_url: string; sort_order: number; caption: string | null }[]>();
+  for (const image of imagesResult.data ?? []) {
+    const current = imagesByListing.get(image.listing_id) ?? [];
+    current.push({ image_url: image.image_url, sort_order: image.sort_order, caption: image.caption });
+    imagesByListing.set(image.listing_id, current);
+  }
+  const geocodingByPostalCode = new Map((geocodingResult.data ?? []).map((row) => [row.postal_code, row]));
+  const commuteByPostalCode = new Map((commuteResult.data ?? []).map((row) => [row.postal_code, row]));
+  const hydrate = (listing: ListingCard): ListingCard => ({
+    ...listing,
+    geocoding: listing.postal_code ? geocodingByPostalCode.get(listing.postal_code) ?? null : null,
+    ntu_commute: listing.postal_code ? commuteByPostalCode.get(listing.postal_code) ?? null : null,
+    listing_images: listing.card_source === "official" ? imagesByListing.get(listing.id) ?? [] : []
+  });
+
+  return {
+    officialListings: officialListings.map(hydrate),
+    candidateListings: candidateListings.map(hydrate)
+  };
+}
+
 export async function searchListings(searchParams: Record<string, string | string[] | undefined>) {
   const supabase = await createClient();
+  const adminSupabase = createAdminClient();
+  const profile = await getCurrentProfile();
+  const keyword = String(searchParams.q ?? "").trim();
+  const candidateNo = parseCandidateNo(keyword);
   const selectedFacilities = Array.isArray(searchParams.facility)
     ? searchParams.facility.map(String)
     : searchParams.facility
       ? [String(searchParams.facility)]
       : [];
 
+  const location = String(searchParams.location ?? "").trim();
+  let locationPostalCodes: string[] = [];
+  if (location) {
+    const escaped = location.replaceAll("%", "\\%").replaceAll("_", "\\_").replaceAll(",", " ");
+    const { data: matchingGeocoding } = await supabase
+      .from("geocoding_cache")
+      .select("postal_code")
+      .or(`postal_code.ilike.%${escaped}%,block.ilike.%${escaped}%,road_name.ilike.%${escaped}%,building.ilike.%${escaped}%`)
+      .limit(100);
+    locationPostalCodes = [...new Set((matchingGeocoding ?? []).map((row) => row.postal_code).filter(Boolean))];
+  }
+
   let query = supabase
     .from("listings")
-    .select("id,listing_no,title,rent_amount,room_type,postal_code,available_from,available_note,min_lease_months,cooking_policy,registration_allowed,landlord_staying,bathroom_shared_with_count,current_occupants_count,description,description_clean")
+    .select("id,listing_no,title,rent_amount,room_type,postal_code,available_from,available_note,min_lease_months,cooking_policy,registration_allowed,landlord_staying,bathroom_shared_with_count,current_occupants_count,description,description_clean,updated_at")
     .eq("status", "published");
+
+  if (candidateNo) {
+    query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+  }
 
   if (selectedFacilities.length > 0) {
     const { data: facilityRows, error: facilityError } = await supabase
@@ -185,12 +283,12 @@ export async function searchListings(searchParams: Record<string, string | strin
       counts.set(row.listing_id, set);
     }
     const matchingIds = [...counts.entries()].filter(([, set]) => set.size === selectedFacilities.length).map(([id]) => id);
-    if (matchingIds.length === 0) return [];
-    query = query.in("id", matchingIds);
+    query = matchingIds.length === 0
+      ? query.eq("id", "00000000-0000-0000-0000-000000000000")
+      : query.in("id", matchingIds);
   }
 
-  const keyword = String(searchParams.q ?? "").trim();
-  if (keyword) {
+  if (keyword && !candidateNo) {
     const escaped = keyword.replaceAll("%", "\\%").replaceAll("_", "\\_").replaceAll(",", " ");
     if (/^[0-9]{5}$/.test(keyword)) query = query.eq("listing_no", Number(keyword));
     else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(keyword)) query = query.eq("id", keyword);
@@ -208,39 +306,33 @@ export async function searchListings(searchParams: Record<string, string | strin
   if (searchParams.max_current_occupants) query = query.lte("current_occupants_count", Number(searchParams.max_current_occupants));
   if (searchParams.gender_preference) query = query.in("gender_preference", ["any", String(searchParams.gender_preference)]);
 
-  const location = String(searchParams.location ?? "").trim();
-  let locationPostalCodes: string[] | null = null;
   if (location) {
-    const escaped = location.replaceAll("%", "\\%").replaceAll("_", "\\_").replaceAll(",", " ");
-    const { data: matchingGeocoding } = await supabase
-      .from("geocoding_cache")
-      .select("postal_code")
-      .or(`postal_code.ilike.%${escaped}%,block.ilike.%${escaped}%,road_name.ilike.%${escaped}%,building.ilike.%${escaped}%`)
-      .limit(100);
-    locationPostalCodes = [...new Set((matchingGeocoding ?? []).map((row) => row.postal_code).filter(Boolean))];
-    if (locationPostalCodes.length === 0) query = query.eq("postal_code", "__no_match__");
-    else query = query.in("postal_code", locationPostalCodes);
+    query = locationPostalCodes.length === 0
+      ? query.eq("id", "00000000-0000-0000-0000-000000000000")
+      : query.in("postal_code", locationPostalCodes);
   }
 
   const sort = String(searchParams.sort ?? "latest");
   if (sort === "price_asc") query = query.order("rent_amount", { ascending: true });
   else if (sort === "available_soon") query = query.order("available_from", { ascending: true });
-  else query = query.order("created_at", { ascending: false });
+  else query = query.order("updated_at", { ascending: false });
 
-  const { data, error } = await query.limit(60);
+  const [{ data, error }, candidateListings] = await Promise.all([
+    query.limit(60),
+    selectedFacilities.length > 0 || profile?.role !== "admin"
+      ? Promise.resolve([] as ListingCard[])
+      : searchCandidateListings(adminSupabase, searchParams, keyword, candidateNo, location, locationPostalCodes)
+  ]);
   if (error) throw new Error(error.message);
 
   const officialListings = ((data ?? []) as ListingCard[]).map((listing) => ({
     ...listing,
-    card_source: "official" as const,
-    source_label: "已授权房源"
+    card_source: "official" as const
   }));
 
-  const candidateListings = selectedFacilities.length > 0 ? [] : await searchCandidateListings(supabase, searchParams, keyword, location, locationPostalCodes);
   const listings = [...officialListings, ...candidateListings];
   const officialIds = officialListings.map((listing) => listing.id);
   const postalCodes = [...new Set(listings.map((listing) => listing.postal_code).filter(Boolean))] as string[];
-
   if (listings.length === 0) return listings;
 
   const [imagesResult, geocodingResult, commuteResult] = await Promise.all([
@@ -259,12 +351,11 @@ export async function searchListings(searchParams: Record<string, string | strin
         .eq("status", "success")
       : Promise.resolve({ data: [] as { postal_code: string; block: string | null; road_name: string | null; building: string | null; property_type: string | null; latitude: number | null; longitude: number | null }[] }),
     postalCodes.length > 0
-      ? supabase
+      ? adminSupabase
         .from("listing_commute_cache")
-        .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,computed_at")
+        .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,ntu_straight_distance_km,status,skip_reason,computed_at")
         .in("postal_code", postalCodes)
-        .eq("status", "success")
-      : Promise.resolve({ data: [] as { postal_code: string; ntu_bus_minutes: number | null; ntu_drive_minutes: number | null; computed_at: string | null }[] })
+      : Promise.resolve({ data: [] as NonNullable<ListingCard["ntu_commute"]>[] })
   ]);
 
   const imagesByListing = new Map<string, { image_url: string; sort_order: number; caption: string | null }[]>();
@@ -285,28 +376,58 @@ export async function searchListings(searchParams: Record<string, string | strin
 
   if (sort === "price_asc") return hydrated.sort((a, b) => a.rent_amount - b.rent_amount).slice(0, 60);
   if (sort === "available_soon") return hydrated.sort((a, b) => a.available_from.localeCompare(b.available_from)).slice(0, 60);
-  return hydrated.slice(0, 60);
+  if (sort === "ntu_commute") return hydrated.sort(compareNtuCommute).slice(0, 60);
+  return hydrated
+    .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+    .slice(0, 60);
+}
+
+function compareNtuCommute(left: ListingCard, right: ListingCard) {
+  const left_commute = left.ntu_commute;
+  const right_commute = right.ntu_commute;
+  const left_group = commuteSortGroup(left_commute);
+  const right_group = commuteSortGroup(right_commute);
+  if (left_group !== right_group) return left_group - right_group;
+
+  if (left_group === 0) {
+    return (left_commute?.ntu_bus_minutes ?? Number.POSITIVE_INFINITY) -
+      (right_commute?.ntu_bus_minutes ?? Number.POSITIVE_INFINITY);
+  }
+  return (left_commute?.ntu_straight_distance_km ?? Number.POSITIVE_INFINITY) -
+    (right_commute?.ntu_straight_distance_km ?? Number.POSITIVE_INFINITY);
+}
+
+function commuteSortGroup(commute: ListingCard["ntu_commute"]) {
+  if (commute?.ntu_bus_minutes != null) return 0;
+  if (commute?.ntu_straight_distance_km != null && commute.status !== "skipped_far") return 1;
+  if (commute?.status === "skipped_far") return 2;
+  return 3;
 }
 
 async function searchCandidateListings(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createAdminClient>,
   searchParams: Record<string, string | string[] | undefined>,
   keyword: string,
+  candidateNo: number | null,
   location: string,
-  locationPostalCodes: string[] | null
+  locationPostalCodes: string[],
+  limit = 60
 ): Promise<ListingCard[]> {
   let query = supabase
     .from("listing_import_candidates")
-    .select("id,source,source_url,parsed_title,parsed_rent_amount,parsed_postal_code,parsed_area,parsed_mrt,parsed_room_type,parsed_available_from,parsed_available_note,parsed_min_lease_months,parsed_cooking_policy,parsed_registration_allowed,parsed_landlord_staying,parsed_bathroom_shared_with_count,parsed_current_occupants_count,parsed_description,parsed_description_clean,created_at")
-    .in("import_status", ["parsed", "needs_review"])
+    .select("id,candidate_no,source,source_url,parsed_title,parsed_rent_amount,parsed_postal_code,parsed_area,parsed_mrt,parsed_room_type,parsed_available_from,parsed_available_note,parsed_min_lease_months,parsed_cooking_policy,parsed_registration_allowed,parsed_landlord_staying,parsed_bathroom_shared_with_count,parsed_current_occupants_count,parsed_description,parsed_description_clean,updated_at")
+    .in("import_status", ["parsed", "needs_review", "approved"])
     .is("listing_id", null)
     .not("parsed_title", "is", null)
     .not("parsed_rent_amount", "is", null);
 
-  if (keyword) {
+  if (candidateNo) {
+    query = query.eq("candidate_no", candidateNo);
+  } else if (keyword) {
     const escaped = keyword.replaceAll("%", "\\%").replaceAll("_", "\\_").replaceAll(",", " ");
     query = query.or(`parsed_title.ilike.%${escaped}%,parsed_description.ilike.%${escaped}%,parsed_description_clean.ilike.%${escaped}%,parsed_area.ilike.%${escaped}%,parsed_mrt.ilike.%${escaped}%`);
   }
+
   if (searchParams.min_price) query = query.gte("parsed_rent_amount", Number(searchParams.min_price));
   if (searchParams.max_price) query = query.lte("parsed_rent_amount", Number(searchParams.max_price));
   if (searchParams.room_type) query = query.eq("parsed_room_type", searchParams.room_type);
@@ -318,26 +439,32 @@ async function searchCandidateListings(
   if (searchParams.max_bathroom_shared) query = query.lte("parsed_bathroom_shared_with_count", Number(searchParams.max_bathroom_shared));
   if (searchParams.max_current_occupants) query = query.lte("parsed_current_occupants_count", Number(searchParams.max_current_occupants));
 
+  if (searchParams.gender_preference || (Array.isArray(searchParams.facility) ? searchParams.facility.length > 0 : searchParams.facility)) {
+    query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+  }
+
   if (location) {
     const escaped = location.replaceAll("%", "\\%").replaceAll("_", "\\_").replaceAll(",", " ");
-    const areaMatch = `parsed_area.ilike.%${escaped}%,parsed_mrt.ilike.%${escaped}%`;
-    if (locationPostalCodes?.length) {
-      query = query.or(`${areaMatch},parsed_postal_code.in.(${locationPostalCodes.join(",")})`);
-    } else {
-      query = query.or(areaMatch);
-    }
+    const locationFilters = [
+      `parsed_postal_code.ilike.%${escaped}%`,
+      `parsed_area.ilike.%${escaped}%`,
+      `parsed_mrt.ilike.%${escaped}%`
+    ];
+    if (locationPostalCodes.length > 0) locationFilters.push(`parsed_postal_code.in.(${locationPostalCodes.join(",")})`);
+    query = query.or(locationFilters.join(","));
   }
 
   const sort = String(searchParams.sort ?? "latest");
   if (sort === "price_asc") query = query.order("parsed_rent_amount", { ascending: true });
-  else if (sort === "available_soon") query = query.order("parsed_available_from", { ascending: true, nullsFirst: false });
-  else query = query.order("created_at", { ascending: false });
+  else if (sort === "available_soon") query = query.order("parsed_available_from", { ascending: true });
+  else query = query.order("updated_at", { ascending: false });
 
-  const { data, error } = await query.limit(60);
+  const { data, error } = await query.limit(limit);
   if (error) throw new Error(error.message);
 
   return (data ?? []).map((candidate) => ({
     id: `candidate-${candidate.id}`,
+    candidate_no: candidate.candidate_no,
     listing_no: null,
     title: candidate.parsed_title ?? "未命名网络房源",
     rent_amount: candidate.parsed_rent_amount ?? 0,
@@ -346,27 +473,28 @@ async function searchCandidateListings(
     available_from: candidate.parsed_available_from ?? new Date().toISOString().slice(0, 10),
     available_note: candidate.parsed_available_note,
     min_lease_months: candidate.parsed_min_lease_months ?? 6,
-    cooking_policy: candidate.parsed_cooking_policy,
+    cooking_policy: candidate.parsed_cooking_policy as ListingCard["cooking_policy"],
     registration_allowed: candidate.parsed_registration_allowed ?? false,
     landlord_staying: candidate.parsed_landlord_staying ?? false,
     bathroom_shared_with_count: candidate.parsed_bathroom_shared_with_count,
     current_occupants_count: candidate.parsed_current_occupants_count,
     description: candidate.parsed_description,
     description_clean: candidate.parsed_description_clean,
+    updated_at: candidate.updated_at,
+    source_url: candidate.source_url,
     geocoding: null,
     ntu_commute: null,
     listing_images: [],
-    card_source: "candidate" as const,
-    source_label: "网络整理 · 待授权",
-    source_url: candidate.source_url
+    card_source: "candidate" as const
   }));
 }
 
 export async function getListingDetail(id: string) {
   const supabase = await createClient();
+  const adminSupabase = createAdminClient();
   const { data, error } = await supabase
     .from("listings")
-    .select("id,listing_no,owner_id,status,title,listing_type,room_type,rent_amount,deposit_amount,postal_code,available_from,available_note,min_lease_months,max_occupants,gender_preference,registration_allowed,landlord_staying,total_bedrooms,total_bathrooms,current_occupants_count,bathroom_shared_with_count,description,description_clean,source,contact_visibility,wechat,phone,is_owner_direct,is_agent,is_sublet,verification_status,utilities_policy,aircon_policy,cooking_policy,visitors_policy,smoking_policy,pets_policy,tenant_type_preference")
+    .select("id,listing_no,owner_id,status,title,listing_type,room_type,rent_amount,deposit_amount,postal_code,available_from,available_note,min_lease_months,max_occupants,gender_preference,registration_allowed,landlord_staying,total_bedrooms,total_bathrooms,current_occupants_count,bathroom_shared_with_count,description,description_clean,source,contact_visibility,wechat,phone,is_owner_direct,is_agent,is_sublet,verification_status,utilities_policy,aircon_policy,cooking_policy,visitors_policy,smoking_policy,pets_policy,tenant_type_preference,updated_at")
     .eq("id", id)
     .single();
 
@@ -382,11 +510,10 @@ export async function getListingDetail(id: string) {
       .eq("postal_code", data.postal_code)
       .eq("status", "success")
       .maybeSingle(),
-    supabase
+    adminSupabase
       .from("listing_commute_cache")
-      .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,computed_at")
+      .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,ntu_straight_distance_km,status,skip_reason,computed_at")
       .eq("postal_code", data.postal_code)
-      .eq("status", "success")
       .maybeSingle()
   ]);
 

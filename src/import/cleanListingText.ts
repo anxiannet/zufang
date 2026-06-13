@@ -65,7 +65,7 @@ function firstUsefulLine(text: string): string | null {
 }
 
 function normalizeLine(value?: string | null): string | null {
-  const normalized = value?.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim() ?? "";
+  const normalized = (value ?? "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
   return normalized || null;
 }
 

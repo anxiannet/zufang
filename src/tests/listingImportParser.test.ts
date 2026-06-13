@@ -17,6 +17,11 @@ function parse(text: string, title?: string) {
   return { candidate, decision: decideImportStatus(candidate) };
 }
 
+const emptyCleaned = cleanListingText({});
+assert.equal(emptyCleaned.title, null);
+assert.equal(emptyCleaned.rawText, "");
+assert.equal(emptyCleaned.cleanText, "");
+
 const sample1 = parse(
   "房间干净，靠近AMK地铁 近地铁空调房可煮无中介费带家具马上入住限女生组屋 86936399 $1,000",
   "房间干净，靠近AMK地铁"
@@ -35,9 +40,10 @@ assert.equal(sample1.candidate.parsed_postal_code, null);
 assert.equal(sample1.decision.import_status, "needs_review");
 
 const sample2 = parse(
-  "Pioneer 先驱地铁站 Jurong West 主人房出租 $1300 包水电 有空调 可报地址 blk975 邮编640975 电话84392266"
+  "Pioneer 先驱地铁站 Jurong West 主人房出租 $1300 押金$1,300 包水电 有空调 可报地址 blk975 邮编640975 电话84392266"
 );
 assert.equal(sample2.candidate.parsed_rent_amount, 1300);
+assert.equal(sample2.candidate.parsed_deposit_amount, 1300);
 assert.equal(sample2.candidate.parsed_postal_code, "640975");
 assert.equal(sample2.candidate.parsed_area, "Jurong West");
 assert.equal(sample2.candidate.parsed_mrt, "Pioneer");

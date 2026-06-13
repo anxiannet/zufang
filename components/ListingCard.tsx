@@ -11,13 +11,11 @@ const roomLabels: Record<string, string> = {
   studio: "Studio公寓"
 };
 
-type CandidateListingCard = ListingCardType & { candidate_no?: number | null };
-
 function formatCandidateNo(value: number | null | undefined) {
   return value ? `#C${String(value).padStart(4, "0")}` : "#C----";
 }
 
-export function ListingCard({ listing }: { listing: CandidateListingCard }) {
+export function ListingCard({ listing }: { listing: ListingCardType }) {
   const image = listing.listing_images?.sort((a, b) => a.sort_order - b.sort_order)[0]?.image_url;
   const address = [listing.geocoding?.building, listing.geocoding?.block ? `Blk ${listing.geocoding.block}` : null, listing.geocoding?.road_name]
     .filter(Boolean)
@@ -27,19 +25,19 @@ export function ListingCard({ listing }: { listing: CandidateListingCard }) {
   const visibleNo = isCandidate ? formatCandidateNo(listing.candidate_no) : listing.listing_no ? `#${listing.listing_no}` : "#-----";
   const content = (
     <>
-      <div className="relative aspect-[4/3] bg-gray-100">
-        {image ? (
-          <Image src={image} alt={listing.title} fill className="object-cover" sizes="(max-width: 768px) 100vw, 33vw" />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-muted">暂无图片</div>
-        )}
-        {listing.source_label ? (
-          <div className="absolute left-3 top-3 rounded-full bg-white/90 px-2 py-1 text-xs font-semibold text-ink shadow-sm">
-            {listing.source_label}
-          </div>
-        ) : null}
-      </div>
+      {!isCandidate ? (
+        <div className="relative aspect-[4/3] bg-gray-100">
+          {image ? (
+            <Image src={image} alt={listing.title} fill className="object-cover" sizes="(max-width: 768px) 100vw, 33vw" />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-muted">暂无图片</div>
+          )}
+        </div>
+      ) : null}
       <div className="space-y-3 p-4">
+        {isCandidate ? (
+          <div className="w-fit rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-muted">网络整理</div>
+        ) : null}
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="mb-1 text-xs font-semibold text-brand">
@@ -63,10 +61,11 @@ export function ListingCard({ listing }: { listing: CandidateListingCard }) {
           <span className="rounded bg-gray-50 px-2 py-1">{listing.cooking_policy === "full" ? "可大煮" : listing.cooking_policy === "light" ? "可小煮" : listing.cooking_policy === "no" ? "不可煮" : "煮饭未说明"}</span>
           <span className="rounded bg-gray-50 px-2 py-1">{listing.landlord_staying ? "屋主同住" : "无屋主同住"}</span>
           {listing.ntu_commute?.ntu_bus_minutes ? (
-            <span className="rounded bg-gray-50 px-2 py-1">NTU 公交 {listing.ntu_commute.ntu_bus_minutes} 分钟</span>
-          ) : null}
-          {listing.ntu_commute?.ntu_drive_minutes ? (
-            <span className="rounded bg-gray-50 px-2 py-1">NTU 驾车 {listing.ntu_commute.ntu_drive_minutes} 分钟</span>
+            <span className="rounded bg-gray-50 px-2 py-1">到 NTU 约 {listing.ntu_commute.ntu_bus_minutes} 分钟</span>
+          ) : listing.ntu_commute?.ntu_straight_distance_km != null ? (
+            <span className="rounded bg-gray-50 px-2 py-1">
+              距 NTU 直线约 {formatDistance(listing.ntu_commute.ntu_straight_distance_km)} km
+            </span>
           ) : null}
         </div>
       </div>
@@ -86,4 +85,8 @@ export function ListingCard({ listing }: { listing: CandidateListingCard }) {
       {content}
     </Link>
   );
+}
+
+function formatDistance(distance_km: number) {
+  return distance_km.toFixed(1).replace(/\.0$/, "");
 }
