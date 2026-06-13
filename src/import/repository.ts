@@ -140,7 +140,7 @@ export async function importCandidateToListing(
     .eq("id", candidate_id)
     .single();
   if (candidate_error || !candidate) throw new Error(candidate_error?.message ?? "Candidate not found");
-  if (candidate.import_status !== "approved") throw new Error("Candidate must be approved before import");
+  if (!["parsed", "needs_review"].includes(candidate.import_status)) throw new Error("Candidate must be published or under review before import");
   if (candidate.listing_id) throw new Error("Candidate has already been imported");
 
   const required = [
@@ -174,7 +174,14 @@ export async function importCandidateToListing(
   }
 
   const now = new Date().toISOString();
-  const internal_note = "由候选房源人工联系并确认授权后录入正式房源表";
+  const candidate_no = candidate.candidate_no ? `C${String(candidate.candidate_no).padStart(4, "0")}` : candidate.id;
+  const imported_source = mapFormalListingSource(candidate.source);
+  const internal_note = [
+    `由候选房源 ${candidate_no} 导入`,
+    "已人工联系并确认授权",
+    `候选来源=${candidate.source}`,
+    `候选链接=${candidate.source_url ?? ""}`
+  ].join("；");
 
   const { data: listing, error: listing_error } = await supabase
     .from("listings")
@@ -200,7 +207,7 @@ export async function importCandidateToListing(
       bathroom_shared_with_count: candidate.parsed_bathroom_shared_with_count,
       description: candidate.parsed_description,
       description_clean: candidate.parsed_description_clean,
-      source: "manual",
+      source: imported_source,
       contact_visibility: "group_only",
       wechat: candidate.parsed_wechat,
       phone: candidate.parsed_phone,
@@ -244,10 +251,18 @@ export async function importCandidateToListing(
       updated_at: now
     })
     .eq("id", candidate.id)
-    .eq("import_status", "approved");
+    .in("import_status", ["parsed", "needs_review"]);
   if (update_error) throw new Error(update_error.message);
 
   return { listing_id: listing.id };
+}
+
+function mapFormalListingSource(value: string | null): "owner_submit" | "wechat_group" | "zufang" | "xiaohongshu" | "manual" {
+  const normalized = (value ?? "").toLowerCase();
+  if (normalized.includes("wechat") || normalized.includes("微信")) return "wechat_group";
+  if (normalized.includes("xiaohongshu") || normalized.includes("小红书")) return "xiaohongshu";
+  if (normalized.includes("zufang") || normalized.includes("shicheng") || normalized.includes("bbs")) return "zufang";
+  return "manual";
 }
 
 function mapListingType(value: string | null): "room" | "whole_unit" | "student_apartment" | "bedspace" | null {
