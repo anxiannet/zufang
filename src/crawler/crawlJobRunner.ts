@@ -2,6 +2,7 @@ import { createCrawlJob, failCrawlJob, findRecentRunningJob, finishCrawlJob } fr
 import { CrawlMode, CrawlSummary } from "../models/listing";
 import { config, validateConfig } from "../utils/config";
 import { flushLogger, setLoggerJobId } from "../utils/logger";
+import { maintainStaleListings } from "./staleListingMaintenance";
 import { crawlZufangRecentListings } from "./zufangCrawler";
 
 const JOB_NAME = "zufang-daily-crawl";
@@ -43,7 +44,12 @@ export async function runZufangCrawlJob(mode: CrawlMode): Promise<CrawlJobRunRes
       maxInserted: config.maxInsertedPerRun,
       mode
     });
-    const summary: CrawlSummary = crawlSummary;
+    const staleListings = await maintainStaleListings();
+    const summary: CrawlSummary = {
+      ...crawlSummary,
+      errors: crawlSummary.errors + staleListings.errors,
+      staleListings
+    };
     await flushLogger();
     await finishCrawlJob(job.id, summary);
     const finishedAt = new Date().toISOString();

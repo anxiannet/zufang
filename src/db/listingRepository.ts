@@ -1,4 +1,4 @@
-import { ListListing, RawDetailListing } from "../models/listing";
+import { ListListing, RawDetailListing, StaleIngestionListing } from "../models/listing";
 import { config } from "../utils/config";
 import { supabaseRequest } from "./pool";
 
@@ -16,6 +16,8 @@ type RawListingInput = {
   list: ListListing;
   detail: RawDetailListing;
 };
+
+const OPTIONAL_INGESTION_COLUMNS = new Set(["list_phone", "list_wechat", "list_posted_at", "last_seen_at"]);
 
 export async function touchListingLastSeen(listing: ListListing): Promise<void> {
   const row = {
@@ -36,14 +38,7 @@ export async function touchListingLastSeen(listing: ListListing): Promise<void> 
     last_seen_at: new Date().toISOString()
   };
 
-  await supabaseRequest(`${config.listingTableName}?on_conflict=source,source_id`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=minimal"
-    },
-    body: JSON.stringify(row)
-  });
+  await writeListingRow(`${config.listingTableName}?on_conflict=source,source_id`, "POST", row, "resolution=merge-duplicates,return=minimal");
 }
 
 export async function upsertRawListing(input: RawListingInput): Promise<SaveResult> {
@@ -51,27 +46,18 @@ export async function upsertRawListing(input: RawListingInput): Promise<SaveResu
   const row = toRawListingRow(input);
 
   if (!existing) {
-    await supabaseRequest(`${config.listingTableName}?on_conflict=source,source_id`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates,return=minimal"
-      },
-      body: JSON.stringify(row)
-    });
+    await writeListingRow(`${config.listingTableName}?on_conflict=source,source_id`, "POST", row, "resolution=merge-duplicates,return=minimal");
     return { inserted: true, changed: false };
   }
 
   const changed = normalizeComparable(existing.raw_detail_html) !== normalizeComparable(row.raw_detail_html);
 
-  await supabaseRequest(`${config.listingTableName}?source=eq.${encodeURIComponent(input.detail.source)}&source_id=eq.${encodeURIComponent(input.detail.sourceId)}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Prefer: "return=minimal"
-    },
-    body: JSON.stringify(row)
-  });
+  await writeListingRow(
+    `${config.listingTableName}?source=eq.${encodeURIComponent(input.detail.source)}&source_id=eq.${encodeURIComponent(input.detail.sourceId)}`,
+    "PATCH",
+    row,
+    "return=minimal"
+  );
 
   return { inserted: false, changed };
 }
@@ -88,6 +74,128 @@ export async function markRemovedFromSource(source: string, sourceId: string): P
       scraped_at: new Date().toISOString()
     })
   });
+}
+
+export async function findStaleListings(cutoff: Date, limit: number): Promise<StaleIngestionListing[]> {
+  const params = new URLSearchParams({
+    select: "id,source,source_id,listing_url,detail_url,list_title,scraped_at",
+    detail_url: "not.is.null",
+    removed_from_source: "eq.false",
+    scraped_at: `lt.${cutoff.toISOString()}`,
+    order: "scraped_at.asc",
+    limit: String(limit)
+  });
+
+  const rows = await supabaseRequest<Array<Omit<StaleIngestionListing, "detail_url"> & { detail_url: string | null }>>(
+    `${config.listingTableName}?${params.toString()}`
+  );
+
+  return rows.filter((row): row is StaleIngestionListing => Boolean(row.detail_url));
+}
+
+export async function findAllCandidateListings(): Promise<StaleIngestionListing[]> {
+  const ingestionIds: Array<string | number> = [];
+  const pageSize = 1000;
+
+  for (let offset = 0; ; offset += pageSize) {
+    const params = new URLSearchParams({
+      select: "ingestion_listing_id",
+      order: "ingestion_listing_id.asc",
+      offset: String(offset),
+      limit: String(pageSize)
+    });
+    const rows = await supabaseRequest<Array<{ ingestion_listing_id: string | number }>>(
+      `listing_import_candidates?${params.toString()}`
+    );
+    ingestionIds.push(...rows.map((row) => row.ingestion_listing_id));
+    if (rows.length < pageSize) break;
+  }
+
+  const listings: StaleIngestionListing[] = [];
+  const chunkSize = 100;
+
+  for (let index = 0; index < ingestionIds.length; index += chunkSize) {
+    const chunk = ingestionIds.slice(index, index + chunkSize);
+    const params = new URLSearchParams({
+      select: "id,source,source_id,listing_url,detail_url,list_title,scraped_at",
+      id: `in.(${chunk.map(String).join(",")})`,
+      detail_url: "not.is.null",
+      removed_from_source: "eq.false",
+      order: "scraped_at.asc"
+    });
+    const rows = await supabaseRequest<Array<Omit<StaleIngestionListing, "detail_url"> & { detail_url: string | null }>>(
+      `${config.listingTableName}?${params.toString()}`
+    );
+    listings.push(...rows.filter((row): row is StaleIngestionListing => Boolean(row.detail_url)));
+  }
+
+  return listings;
+}
+
+export async function refreshStaleListingDetail(
+  listing: StaleIngestionListing,
+  html: string,
+  checkedAt: Date
+): Promise<void> {
+  await supabaseRequest(
+    `${config.listingTableName}?source=eq.${encodeURIComponent(listing.source)}&source_id=eq.${encodeURIComponent(listing.source_id)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Prefer: "return=minimal"
+      },
+      body: JSON.stringify({
+        raw_detail_html: html,
+        scraped_at: checkedAt.toISOString(),
+        removed_from_source: false
+      })
+    }
+  );
+
+  await supabaseRequest(`listing_import_candidates?ingestion_listing_id=eq.${listing.id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Prefer: "return=minimal"
+    },
+    body: JSON.stringify({
+      updated_at: checkedAt.toISOString()
+    })
+  });
+}
+
+export async function deleteStaleListing(listing: StaleIngestionListing, reason: string): Promise<void> {
+  await supabaseRequest("deleted_ingestion_listings?on_conflict=source,source_id", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify({
+      source: listing.source,
+      source_id: listing.source_id,
+      listing_url: listing.listing_url,
+      detail_url: listing.detail_url,
+      title: listing.list_title,
+      reason: "source_deleted",
+      deleted_by: "crawler",
+      deleted_at: new Date().toISOString(),
+      metadata: {
+        matched_notice: reason
+      }
+    })
+  });
+
+  await supabaseRequest(
+    `${config.listingTableName}?source=eq.${encodeURIComponent(listing.source)}&source_id=eq.${encodeURIComponent(listing.source_id)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Prefer: "return=minimal"
+      }
+    }
+  );
 }
 
 export async function hasExistingRawDetail(source: string, sourceId: string): Promise<boolean> {
@@ -141,4 +249,48 @@ function toRawListingRow(input: RawListingInput): Record<string, unknown> {
     is_top: list.isTop,
     removed_from_source: false
   };
+}
+
+async function writeListingRow(path: string, method: "POST" | "PATCH", row: Record<string, unknown>, prefer: string): Promise<void> {
+  let currentRow = row;
+
+  while (true) {
+    try {
+      await supabaseRequest(path, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Prefer: prefer
+        },
+        body: JSON.stringify(currentRow)
+      });
+      return;
+    } catch (error) {
+      const nextRow = pruneUnsupportedOptionalColumn(currentRow, error);
+      if (!nextRow) {
+        throw error;
+      }
+      currentRow = nextRow;
+    }
+  }
+}
+
+function pruneUnsupportedOptionalColumn(row: Record<string, unknown>, error: unknown): Record<string, unknown> | null {
+  const missingColumn = getMissingColumnFromError(error);
+  if (!missingColumn || !OPTIONAL_INGESTION_COLUMNS.has(missingColumn) || !(missingColumn in row)) {
+    return null;
+  }
+
+  const nextRow = { ...row };
+  delete nextRow[missingColumn];
+  return nextRow;
+}
+
+export function getMissingColumnFromError(error: unknown): string | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const match = error.message.match(/Could not find the '([^']+)' column of '[^']+' in the schema cache/);
+  return match?.[1] ?? null;
 }

@@ -46,16 +46,6 @@ const defaultCrawlTargets: CrawlTarget[] = [
     ...crawlSources["zufang.sg"],
     entryUrl: "https://www.zufang.sg/c31?area_ids%5B0%5D=144&area_ids%5B1%5D=25&area_ids%5B2%5D=65&area_ids%5B3%5D=10&area_ids%5B4%5D=90&area_ids%5B5%5D=50",
     label: "zufang.sg 西部 MRT"
-  },
-  {
-    ...crawlSources["shichengbbs.com"],
-    entryUrl: "https://www.shichengbbs.com/c15",
-    label: "shichengbbs.com 全站单间"
-  },
-  {
-    ...crawlSources["zufang.sg"],
-    entryUrl: "https://www.zufang.sg/c31?category2_id=15",
-    label: "zufang.sg 全站单间"
   }
 ];
 const crawlTargets = crawlEntryUrl
@@ -71,6 +61,8 @@ export const config = {
   maxPagesPerRun: Number.parseInt(process.env.MAX_PAGES_PER_RUN ?? "5", 10),
   maxDetailsPerRun: Number.parseInt(process.env.MAX_DETAILS_PER_RUN ?? "200", 10),
   maxInsertedPerRun: Number.parseInt(process.env.MAX_INSERTED_PER_RUN ?? "50", 10),
+  staleListingRecheckDays: Number.parseInt(process.env.STALE_LISTING_RECHECK_DAYS ?? "7", 10),
+  staleListingRecheckLimit: Number.parseInt(process.env.STALE_LISTING_RECHECK_LIMIT ?? "50", 10),
   baseUrl: crawlSource.baseUrl,
   entryUrl: crawlEntryUrl || crawlSource.entryUrl,
   source: crawlSource.source,
@@ -110,6 +102,14 @@ export function validateConfig(): void {
 
   if (!Number.isFinite(config.maxInsertedPerRun) || config.maxInsertedPerRun <= 0) {
     throw new Error("MAX_INSERTED_PER_RUN must be a positive number.");
+  }
+
+  if (!Number.isFinite(config.staleListingRecheckDays) || config.staleListingRecheckDays <= 0) {
+    throw new Error("STALE_LISTING_RECHECK_DAYS must be a positive number.");
+  }
+
+  if (!Number.isFinite(config.staleListingRecheckLimit) || config.staleListingRecheckLimit <= 0) {
+    throw new Error("STALE_LISTING_RECHECK_LIMIT must be a positive number.");
   }
 
   if (!Number.isFinite(config.detailConcurrency) || config.detailConcurrency <= 0) {

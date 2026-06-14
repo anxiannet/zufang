@@ -6,6 +6,20 @@ import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
+const listing_statuses = new Set(["draft", "pending_review", "published", "rejected", "rented"]);
+const listing_types = new Set(["room", "whole_unit", "student_apartment", "bedspace"]);
+const room_types = new Set(["common_room", "master_room", "studio", "partition_room", "maid_room"]);
+const gender_preferences = new Set(["any", "male", "female"]);
+const listing_sources = new Set(["owner_submit", "wechat_group", "zufang", "xiaohongshu", "manual"]);
+const contact_visibilities = new Set(["public", "login_only", "group_only", "private"]);
+const verification_statuses = new Set(["unverified", "owner_verified", "agent_verified", "suspicious", "rejected"]);
+const utilities_policies = new Set(["included", "shared", "excluded", "capped"]);
+const aircon_policies = new Set(["included", "extra_charge", "limited_hours", "not_available"]);
+const cooking_policies = new Set(["full", "light", "no"]);
+const visitors_policies = new Set(["allowed", "limited", "not_allowed"]);
+const binary_policies = new Set(["allowed", "not_allowed"]);
+const facility_availabilities = new Set(["available", "restricted", "not_available"]);
+
 export async function publishListing(listingId: string) {
   await requireRole(["admin"]);
   const supabase = await createClient();
@@ -35,6 +49,172 @@ export async function unpublishListing(listingId: string) {
   if (error) throw new Error(error.message);
   revalidatePath("/admin");
   revalidatePath("/rent");
+}
+
+export async function getAdminListings(filters: Record<string, string | string[] | undefined> = {}) {
+  await requireRole(["admin"]);
+  const supabase = createAdminClient();
+  const q = firstValue(filters.q);
+  const status = firstValue(filters.status);
+
+  let query = supabase
+    .from("listings")
+    .select("id,listing_no,title,status,rent_amount,postal_code,room_type,source,verification_status,owner_id,created_at,updated_at")
+    .order("updated_at", { ascending: false })
+    .limit(200);
+
+  if (status && listing_statuses.has(status)) query = query.eq("status", status);
+  if (q) {
+    const escaped = q.replaceAll("%", "\\%").replaceAll("_", "\\_").replaceAll(",", " ");
+    if (/^\d{1,8}$/.test(q)) {
+      query = query.or(`listing_no.eq.${Number(q)},postal_code.eq.${q}`);
+    } else {
+      query = query.or(`title.ilike.%${escaped}%,postal_code.ilike.%${escaped}%`);
+    }
+  }
+
+  const [listings, profiles, statusRows] = await Promise.all([
+    query,
+    supabase.from("users_profile").select("id,display_name,role"),
+    supabase.from("listings").select("status")
+  ]);
+  if (listings.error) throw new Error(listings.error.message);
+  if (profiles.error) throw new Error(profiles.error.message);
+  if (statusRows.error) throw new Error(statusRows.error.message);
+
+  const profileById = new Map((profiles.data ?? []).map((profile) => [profile.id, profile]));
+  const counts = Object.fromEntries([...listing_statuses].map((value) => [value, 0])) as Record<string, number>;
+  for (const row of statusRows.data ?? []) counts[row.status] = (counts[row.status] ?? 0) + 1;
+
+  return {
+    listings: (listings.data ?? []).map((listing) => ({
+      ...listing,
+      owner: profileById.get(listing.owner_id) ?? null
+    })),
+    counts,
+    filters: { q, status }
+  };
+}
+
+export async function getAdminListingDetail(listingId: string) {
+  await requireRole(["admin"]);
+  const supabase = createAdminClient();
+  const [listing, facilities, images] = await Promise.all([
+    supabase.from("listings").select("*").eq("id", listingId).maybeSingle(),
+    supabase
+      .from("listing_facilities")
+      .select("facility_name,availability,note")
+      .eq("listing_id", listingId)
+      .order("facility_name"),
+    supabase
+      .from("listing_images")
+      .select("id,image_url,sort_order,caption")
+      .eq("listing_id", listingId)
+      .order("sort_order")
+  ]);
+
+  if (listing.error) throw new Error(listing.error.message);
+  if (facilities.error) throw new Error(facilities.error.message);
+  if (images.error) throw new Error(images.error.message);
+  if (!listing.data) return null;
+
+  const { data: owner } = await supabase
+    .from("users_profile")
+    .select("id,display_name,role,phone,whatsapp,wechat")
+    .eq("id", listing.data.owner_id)
+    .maybeSingle();
+
+  return {
+    listing: listing.data,
+    facilities: facilities.data ?? [],
+    images: images.data ?? [],
+    owner: owner ?? null
+  };
+}
+
+export async function updateAdminListing(listingId: string, formData: FormData) {
+  await requireRole(["admin"]);
+  const supabase = createAdminClient();
+  const listingType = requiredEnum(formData, "listing_type", listing_types);
+  const roomType = listingType === "whole_unit" ? null : requiredEnum(formData, "room_type", room_types);
+  const postalCode = requiredText(formData, "postal_code");
+  if (!/^\d{6}$/.test(postalCode)) redirect(`/admin/listings/${listingId}?error=invalid_postal_code`);
+
+  const payload = {
+    title: requiredText(formData, "title"),
+    listing_type: listingType,
+    room_type: roomType,
+    rent_amount: requiredInteger(formData, "rent_amount"),
+    deposit_amount: nullableInteger(formData, "deposit_amount"),
+    postal_code: postalCode,
+    unit_hidden_address: nullableText(formData, "unit_hidden_address"),
+    available_from: requiredText(formData, "available_from"),
+    available_note: nullableText(formData, "available_note"),
+    min_lease_months: requiredInteger(formData, "min_lease_months"),
+    max_occupants: requiredInteger(formData, "max_occupants"),
+    gender_preference: requiredEnum(formData, "gender_preference", gender_preferences),
+    registration_allowed: checkbox(formData, "registration_allowed"),
+    landlord_staying: checkbox(formData, "landlord_staying"),
+    total_bedrooms: nullableInteger(formData, "total_bedrooms"),
+    total_bathrooms: nullableInteger(formData, "total_bathrooms"),
+    current_occupants_count: nullableInteger(formData, "current_occupants_count"),
+    bathroom_shared_with_count: nullableInteger(formData, "bathroom_shared_with_count"),
+    description: nullableText(formData, "description"),
+    description_clean: nullableText(formData, "description_clean"),
+    source: requiredEnum(formData, "source", listing_sources),
+    contact_visibility: requiredEnum(formData, "contact_visibility", contact_visibilities),
+    wechat: nullableText(formData, "wechat"),
+    phone: nullableText(formData, "phone"),
+    is_owner_direct: checkbox(formData, "is_owner_direct"),
+    is_agent: checkbox(formData, "is_agent"),
+    is_sublet: checkbox(formData, "is_sublet"),
+    verification_status: requiredEnum(formData, "verification_status", verification_statuses),
+    utilities_policy: nullableEnum(formData, "utilities_policy", utilities_policies),
+    aircon_policy: nullableEnum(formData, "aircon_policy", aircon_policies),
+    cooking_policy: nullableEnum(formData, "cooking_policy", cooking_policies),
+    visitors_policy: nullableEnum(formData, "visitors_policy", visitors_policies),
+    smoking_policy: nullableEnum(formData, "smoking_policy", binary_policies),
+    pets_policy: nullableEnum(formData, "pets_policy", binary_policies),
+    tenant_type_preference: formData.getAll("tenant_type_preference").map(String),
+    internal_note: nullableText(formData, "internal_note"),
+    rejection_reason: nullableText(formData, "rejection_reason")
+  };
+
+  const { error } = await supabase.from("listings").update(payload).eq("id", listingId);
+  if (error) redirect(`/admin/listings/${listingId}?error=${encodeURIComponent(error.message)}`);
+
+  const facilityRows = formData.getAll("facility_name").map(String).map((facility_name) => ({
+    listing_id: listingId,
+    facility_name,
+    availability: enumValue(
+      String(formData.get(`facility_${facility_name}`) ?? "not_available"),
+      facility_availabilities
+    ),
+    note: nullableText(formData, `facility_note_${facility_name}`)
+  }));
+  if (facilityRows.length > 0) {
+    const { error: facilityError } = await supabase
+      .from("listing_facilities")
+      .upsert(facilityRows, { onConflict: "listing_id,facility_name" });
+    if (facilityError) redirect(`/admin/listings/${listingId}?error=${encodeURIComponent(facilityError.message)}`);
+  }
+
+  revalidateListingPaths(listingId);
+  redirect(`/admin/listings/${listingId}?saved=1`);
+}
+
+export async function setAdminListingStatus(formData: FormData) {
+  await requireRole(["admin"]);
+  const listingId = requiredText(formData, "listing_id");
+  const status = requiredEnum(formData, "status", listing_statuses);
+  const update: Record<string, unknown> = { status };
+  if (status === "published") update.rejection_reason = null;
+  if (status === "rejected") update.rejection_reason = nullableText(formData, "rejection_reason");
+
+  const { error } = await createAdminClient().from("listings").update(update).eq("id", listingId);
+  if (error) redirect(`/admin/listings/${listingId}?error=${encodeURIComponent(error.message)}`);
+  revalidateListingPaths(listingId);
+  redirect(`/admin/listings/${listingId}?status_updated=${status}`);
 }
 
 export async function updateListingModeration(formData: FormData) {
@@ -131,6 +311,61 @@ export async function getAdminDashboard() {
     enquiries: enquiries.data ?? [],
     anomalies: withImageCounts(anomalies.data ?? []).filter((listing: any) => !listing.listing_images?.length || listing.rent_amount < 400 || listing.rent_amount > 10000 || !listing.postal_code)
   };
+}
+
+function firstValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? String(value[0] ?? "").trim() : String(value ?? "").trim();
+}
+
+function requiredText(formData: FormData, key: string) {
+  const value = String(formData.get(key) ?? "").trim();
+  if (!value) throw new Error(`${key} is required`);
+  return value;
+}
+
+function nullableText(formData: FormData, key: string) {
+  return String(formData.get(key) ?? "").trim() || null;
+}
+
+function requiredInteger(formData: FormData, key: string) {
+  const value = Number(requiredText(formData, key));
+  if (!Number.isInteger(value)) throw new Error(`${key} must be an integer`);
+  return value;
+}
+
+function nullableInteger(formData: FormData, key: string) {
+  const value = nullableText(formData, key);
+  if (value === null) return null;
+  const number = Number(value);
+  if (!Number.isInteger(number)) throw new Error(`${key} must be an integer`);
+  return number;
+}
+
+function checkbox(formData: FormData, key: string) {
+  return formData.get(key) === "on";
+}
+
+function enumValue(value: string, allowed: Set<string>) {
+  if (!allowed.has(value)) throw new Error(`Invalid value: ${value}`);
+  return value;
+}
+
+function requiredEnum(formData: FormData, key: string, allowed: Set<string>) {
+  return enumValue(requiredText(formData, key), allowed);
+}
+
+function nullableEnum(formData: FormData, key: string, allowed: Set<string>) {
+  const value = nullableText(formData, key);
+  return value === null ? null : enumValue(value, allowed);
+}
+
+function revalidateListingPaths(listingId: string) {
+  revalidatePath("/");
+  revalidatePath("/rent");
+  revalidatePath(`/rent/${listingId}`);
+  revalidatePath("/admin");
+  revalidatePath("/admin/listings");
+  revalidatePath(`/admin/listings/${listingId}`);
 }
 
 export type IngestionListingFilters = {

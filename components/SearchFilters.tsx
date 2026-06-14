@@ -9,7 +9,7 @@ export function SearchFilters({ searchParams }: { searchParams: Record<string, s
       : [];
 
   return (
-    <form className="card space-y-4 p-4" action="/rent">
+    <form className="card space-y-4 p-4" action="/">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex-1">
           <label htmlFor="q">关键词</label>

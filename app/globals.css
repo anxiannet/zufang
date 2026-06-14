@@ -32,3 +32,7 @@ label {
 .card {
   @apply rounded-lg border border-line bg-white;
 }
+
+.container-page {
+  @apply mx-auto w-full max-w-6xl px-4;
+}

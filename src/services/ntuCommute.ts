@@ -247,36 +247,18 @@ function prepareCommute(
     now.getTime() - new Date(cache!.computed_at!).getTime() < CACHE_TTL_MS;
 
   const distance_band = classifyNtuDistance(ntu_straight_distance_km);
-  if (distance_band === "skipped_far" && !force) {
-    return {
-      ...geocoding,
-      cache,
-      ntu_straight_distance_km,
-      coordinates_changed,
-      is_recent,
-      next_status: "skipped_far",
-      skip_reason: "straight_distance_over_12km",
-      should_call_onemap: false
-    };
-  }
-
   const recent_success = cache?.status === "success" && is_recent && !coordinates_changed && !force;
-  const recent_far = cache?.status === "skipped_far" && is_recent && !coordinates_changed && !force;
   return {
     ...geocoding,
     cache,
     ntu_straight_distance_km,
     coordinates_changed,
     is_recent,
-    next_status: recent_success
-      ? "success"
-      : recent_far
-        ? "skipped_far"
-        : "pending",
+    next_status: recent_success ? "success" : "pending",
     skip_reason: distance_band !== "high_priority"
       ? "low_priority_distance"
       : null,
-    should_call_onemap: !recent_success && !recent_far
+    should_call_onemap: !recent_success
   };
 }
 
@@ -432,7 +414,7 @@ function sameCoordinate(left: number | null, right: number): boolean {
 }
 
 function oneMapHeaders(token: string): HeadersInit {
-  return { Accept: "application/json", Authorization: token, "User-Agent": "sg-chinese-rental-mvp/1.0" };
+  return { Accept: "application/json", Authorization: token, "User-Agent": "ntu-rental-database/1.0" };
 }
 
 async function fetchWithTimeout(input: URL, init: RequestInit): Promise<Response> {

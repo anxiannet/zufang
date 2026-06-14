@@ -66,6 +66,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             <p className="mt-1 text-sm text-muted">查看抓取记录、筛选来源和区域、检查原始文本与联系方式。</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link href="/admin/listings" className="btn-primary">正式房源管理</Link>
             <Link href="/admin/crawler" className="btn-secondary">采集任务</Link>
             <Link href="/admin/ingestion" className="btn-primary">管理采集数据</Link>
             <Link href="/admin/listing-imports" className="btn-primary">候选房源审核</Link>
@@ -89,7 +90,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       <section className="grid gap-3 md:grid-cols-3">
         <AdminNavCard href="/admin/ingestion" title="原始采集层" description="查看 ingestion_listings 原始抓取数据。" />
         <AdminNavCard href="/admin/listing-imports" title="候选审核层" description="修正结构化字段、批准、拒绝或标记重复。" />
-        <AdminNavCard href="/rent" title="正式房源" description="查看已发布的 listings 业务数据。" />
+        <AdminNavCard href="/admin/listings" title="正式房源" description="编辑房源详情、发布、下架、拒绝或标记已出租。" />
       </section>
 
       <section className="card p-4">
@@ -124,6 +125,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                 </form>
               </div>
               <div className="flex flex-wrap gap-2">
+                <Link href={`/admin/listings/${listing.id}`} className="btn-secondary">编辑详情</Link>
                 <form action={publishListing.bind(null, listing.id)}>
                   <button className="btn-primary" type="submit">审核通过</button>
                 </form>

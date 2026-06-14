@@ -1,5 +1,5 @@
 {
-  "name": "sg-chinese-rental-mvp",
+  "name": "ntu-rental-database",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,10 +11,11 @@
     "crawl": "tsx src/index.ts",
     "crawl:local": "tsx src/index.ts",
     "crawl:shichengbbs:test": "CRAWL_SOURCE=shichengbbs.com MAX_PAGES_PER_RUN=1 MAX_DETAILS_PER_RUN=10 MAX_INSERTED_PER_RUN=10 tsx src/index.ts",
+    "check:candidates": "tsx scripts/checkAllCandidateListings.ts",
     "import:crawler-listings": "tsx scripts/importCrawlerListings.ts",
     "enrich:ntu-commute": "tsx scripts/enrichNtuCommute.ts",
     "test:ntu-commute": "tsx src/tests/ntuCommute.test.ts",
-    "test:ingestion": "tsx src/tests/zufangDetailParser.test.ts && tsx src/tests/listingExclusion.test.ts && tsx src/tests/semanticRentalParser.test.ts && tsx src/tests/listingImportParser.test.ts"
+    "test:ingestion": "tsx src/tests/zufangDetailParser.test.ts && tsx src/tests/listingExclusion.test.ts && tsx src/tests/staleListingMaintenance.test.ts && tsx src/tests/semanticRentalParser.test.ts && tsx src/tests/listingImportParser.test.ts && tsx src/tests/listingRepository.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",

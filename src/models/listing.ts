@@ -100,6 +100,15 @@ export type CrawlSummary = {
   detailsFetched: number;
   stoppedReason?: string;
   targets?: CrawlTargetSummary[];
+  staleListings?: StaleListingMaintenanceSummary;
+};
+
+export type StaleListingMaintenanceSummary = {
+  checked: number;
+  refreshed: number;
+  deleted: number;
+  removed: number;
+  errors: number;
 };
 
 export interface IngestionListingRow {
@@ -119,3 +128,13 @@ export interface IngestionListingRow {
   scraped_at: string | null;
   created_at?: string | null;
 }
+
+export type StaleIngestionListing = {
+  id: string | number;
+  source: string;
+  source_id: string;
+  listing_url: string | null;
+  detail_url: string;
+  list_title: string | null;
+  scraped_at: string | null;
+};
