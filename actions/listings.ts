@@ -62,11 +62,11 @@ export async function createListing(
   const profile = await getCurrentProfile();
 
   if (!profile) {
-    return createListingError("session_expired", 4);
+    return createListingError("session_expired", 2);
   }
 
   if (!["landlord", "agent", "admin"].includes(profile.role)) {
-    return createListingError("listing_role", 4);
+    return createListingError("listing_role", 2);
   }
 
   const supabase = await createClient();
@@ -88,13 +88,13 @@ export async function createListing(
   if (!availableFrom) return createListingError("missing_available_from", 0);
   if (listingType !== "whole_unit" && !roomType) return createListingError("missing_room_type", 0);
   if (imageFiles.length > maxImageCount) {
-    return createListingError("image_count", 4);
+    return createListingError("image_count", 2);
   }
   if (imageFiles.some(({ value }) => !allowedImageTypes.has(value.type))) {
-    return createListingError("image_type", 4);
+    return createListingError("image_type", 2);
   }
   if (imageFiles.some(({ value }) => value.size > maxImageSize)) {
-    return createListingError("image_size", 4);
+    return createListingError("image_size", 2);
   }
 
   const isAdmin = profile.role === "admin";
@@ -158,7 +158,7 @@ export async function createListing(
   const { error: facilityInsertError } = await supabase.from("listing_facilities").insert(facilityRows);
   if (facilityInsertError) {
     await supabase.from("listings").delete().eq("id", listing.id);
-    return createListingError("create_failed", 3);
+    return createListingError("create_failed", 1);
   }
 
   const uploadedPaths: string[] = [];
@@ -176,7 +176,7 @@ export async function createListing(
         await supabase.storage.from("listing-images").remove(uploadedPaths);
       }
       await supabase.from("listings").delete().eq("id", listing.id);
-      return createListingError("image_upload", 4);
+      return createListingError("image_upload", 2);
     }
 
     uploadedPaths.push(path);
@@ -194,7 +194,7 @@ export async function createListing(
     if (imageInsertError) {
       await supabase.storage.from("listing-images").remove(uploadedPaths);
       await supabase.from("listings").delete().eq("id", listing.id);
-      return createListingError("image_upload", 4);
+      return createListingError("image_upload", 2);
     }
   }
 
@@ -225,6 +225,21 @@ export async function updateListing(listingId: string, formData: FormData) {
 
   if (error) throw new Error(error.message);
   revalidatePath(`/rent/${listingId}`);
+}
+
+export async function getMyListings() {
+  const profile = await getCurrentProfile();
+  if (!profile || !["landlord", "agent", "admin"].includes(profile.role)) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("listings")
+    .select("id,listing_no,title,status,rent_amount,postal_code,available_from,updated_at")
+    .eq("owner_id", profile.id)
+    .order("updated_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
 export async function submitListingForReview(listingId: string) {

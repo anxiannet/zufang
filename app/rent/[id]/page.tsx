@@ -1,34 +1,51 @@
-import Image from "next/image";
-import { notFound } from "next/navigation";
 import Link from "next/link";
+import { notFound } from "next/navigation";
+import {
+  Bath,
+  BusFront,
+  Check,
+  ChevronLeft,
+  CircleDollarSign,
+  Clock3,
+  CookingPot,
+  Home,
+  Info,
+  MapPinned,
+  MessageCircle,
+  ShieldCheck,
+  Sparkles,
+  Users,
+  X
+} from "lucide-react";
 import { createEnquiry } from "@/actions/enquiries";
 import { getListingDetail } from "@/actions/listings";
+import { ListingDetailHero } from "@/components/listings/ListingDetailHero";
+import { Badge } from "@/components/ui/Badge";
 import { getCurrentProfile } from "@/lib/auth";
 import { facilityLabels } from "@/lib/types";
 
-const roomLabels: Record<string, string> = {
-  common_room: "普通房",
-  master_room: "主人房",
-  single_room: "单人间",
-  partition_room: "隔间",
-  maid_room: "佣人房",
-  studio: "Studio公寓"
-};
-
 const policyLabels: Record<string, string> = {
-  included: "包含",
-  shared: "均摊",
+  included: "包含在租金内",
+  shared: "按住户均摊",
   excluded: "不包含",
   capped: "限额包含",
-  extra_charge: "额外收费",
-  limited_hours: "限时使用",
-  not_available: "不可用",
-  full: "可大煮",
-  light: "可小煮",
-  no: "不可煮",
+  extra_charge: "需要额外付费",
+  limited_hours: "限制使用时段",
+  not_available: "不可使用",
+  full: "可正常煮饭",
+  light: "仅可简单烹饪",
+  no: "不可煮饭",
   allowed: "允许",
   limited: "有限制",
   not_allowed: "不允许"
+};
+
+const tenantLabels: Record<string, string> = {
+  student: "学生",
+  professional: "上班族",
+  couple: "情侣",
+  family: "家庭",
+  single: "单人"
 };
 
 export default async function ListingDetailPage({
@@ -43,171 +60,259 @@ export default async function ListingDetailPage({
   const listing = await getListingDetail(id);
   if (!listing) notFound();
   const profile = await getCurrentProfile();
-
-  const images = listing.listing_images?.sort((a, b) => a.sort_order - b.sort_order) ?? [];
   const facilities = listing.listing_facilities ?? [];
-  const byAvailability = (availability: string) => facilities.filter((item) => item.availability === availability);
-  const address = [
-    listing.geocoding?.building,
-    listing.geocoding?.block ? `Blk ${listing.geocoding.block}` : null,
-    listing.geocoding?.road_name,
-    listing.postal_code
-  ].filter(Boolean).join(" · ");
+  const availableFacilities = facilities.filter((item) => item.availability === "available");
+  const restrictedFacilities = facilities.filter((item) => item.availability === "restricted");
+  const unavailableFacilities = facilities.filter((item) => item.availability === "not_available");
   const canShowContact = listing.contact_visibility === "public" || (listing.contact_visibility === "login_only" && Boolean(profile));
+  const polishedDescription = listing.description_clean || listing.description;
+  const hasSeparateRawText = Boolean(listing.description && listing.description.trim() !== listing.description_clean?.trim());
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 px-4 py-6">
-      <div className="grid gap-3 md:grid-cols-3">
-        <div className="relative aspect-[4/3] overflow-hidden rounded-lg bg-gray-100 md:col-span-2">
-          {images[0] ? <Image src={images[0].image_url} alt={listing.title} fill className="object-cover" priority /> : <div className="flex h-full items-center justify-center text-muted">暂无图片</div>}
-        </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-1">
-          {images.slice(1, 3).map((image) => (
-            <div key={image.image_url} className="relative aspect-[4/3] overflow-hidden rounded-lg bg-gray-100">
-              <Image src={image.image_url} alt={image.caption ?? listing.title} fill className="object-cover" />
+    <div className="container-page py-6 sm:py-10">
+      <Link href="/rent" className="mb-5 inline-flex items-center gap-1 text-sm font-semibold text-muted transition hover:text-brand">
+        <ChevronLeft className="h-4 w-4" /> 返回房源列表
+      </Link>
+
+      <ListingDetailHero listing={listing} />
+
+      <div className="mt-7 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-6">
+          <Panel icon={Sparkles} eyebrow="Listing Summary" title="房源简介">
+            <p className="whitespace-pre-line text-sm leading-7 text-slate-700">
+              {polishedDescription || "房源简介正在整理中，可先查看下方结构化信息。"}
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {getReasons(listing).map((reason) => <Badge key={reason} tone="brand">{reason}</Badge>)}
             </div>
-          ))}
-        </div>
-      </div>
+          </Panel>
 
-      <section className="card grid gap-4 p-4 md:grid-cols-[1fr_280px]">
-        <div>
-          <div className="mb-2 text-sm font-semibold text-brand">房源编号：{listing.listing_no}</div>
-          <h1 className="text-2xl font-bold text-ink">{listing.title}</h1>
-          <p className="mt-2 text-muted">{address || `邮编 ${listing.postal_code}`}</p>
-          {listing.geocoding?.property_type && listing.geocoding.property_type !== "unknown" ? <p className="mt-1 text-sm text-muted">物业类型：{listing.geocoding.property_type}</p> : null}
-          <p className="mt-4 whitespace-pre-line text-sm leading-6 text-ink">{listing.description_clean || listing.description}</p>
-        </div>
-        <div className="rounded-lg bg-teal-50 p-4">
-          <div className="text-3xl font-bold text-brand">${listing.rent_amount}</div>
-          <div className="text-sm text-muted">新加坡元/月 · 押金：${listing.deposit_amount ?? 0}</div>
-          <dl className="mt-4 grid gap-2 text-sm">
-            <Row label="可入住" value={listing.available_from} />
-            {listing.available_note ? <Row label="入住备注" value={listing.available_note} /> : null}
-            <Row label="房间类型" value={listing.room_type ? roomLabels[listing.room_type] ?? listing.room_type : "整套不适用"} />
-            {listing.ntu_commute?.ntu_bus_minutes ? (
-              <Row label="到 NTU" value={`约 ${listing.ntu_commute.ntu_bus_minutes} 分钟`} />
-            ) : listing.ntu_commute?.ntu_straight_distance_km != null ? (
-              <Row label="距 NTU 直线" value={`约 ${formatDistance(listing.ntu_commute.ntu_straight_distance_km)} km`} />
-            ) : null}
-            <Row label="最短租期" value={`${listing.min_lease_months} 个月`} />
-          </dl>
-        </div>
-      </section>
-
-      <section className="grid gap-4 md:grid-cols-2">
-        <Panel title="居住质量">
-          <Row label="整套房间" value={`${listing.total_bedrooms ?? 0} 个`} />
-          <Row label="浴室" value={`${listing.total_bathrooms ?? 0} 个`} />
-          <Row label="当前住户" value={`${listing.current_occupants_count ?? 0} 人`} />
-          <Row label="共用浴室人数" value={`${listing.bathroom_shared_with_count ?? 0} 人`} />
-          <Row label="屋主同住" value={listing.landlord_staying ? "是" : "否"} />
-        </Panel>
-        <Panel title="规则">
-          <Row label="水电" value={policyLabel(listing.utilities_policy)} />
-          <Row label="空调" value={policyLabel(listing.aircon_policy)} />
-          <Row label="煮饭" value={policyLabel(listing.cooking_policy)} />
-          <Row label="可报地址" value={listing.registration_allowed ? "是" : "否"} />
-          <Row label="吸烟" value={policyLabel(listing.smoking_policy)} />
-          <Row label="访客" value={policyLabel(listing.visitors_policy)} />
-          <Row label="宠物" value={policyLabel(listing.pets_policy)} />
-          <Row label="性别偏好" value={listing.gender_preference === "any" ? "不限" : listing.gender_preference} />
-          <Row label="租客偏好" value={listing.tenant_type_preference.length ? listing.tenant_type_preference.join("、") : "不限"} />
-        </Panel>
-      </section>
-
-      <Panel title="设施">
-        <FacilityGroup title="可使用" items={byAvailability("available")} />
-        <FacilityGroup title="限制使用" items={byAvailability("restricted")} />
-        <FacilityGroup title="不可使用" items={byAvailability("not_available")} muted />
-      </Panel>
-
-      <section className="grid gap-4 md:grid-cols-[1fr_360px]">
-        <Panel title="周边信息">
-          <div className="grid gap-2 sm:grid-cols-2">
-            {(listing.nearby_places_cache ?? []).map((place) => (
-              <div key={`${place.place_type}-${place.name}`} className="rounded-md border border-line p-3 text-sm">
-                <div className="font-semibold text-ink">{place.name}</div>
-                <div className="text-muted">{place.place_type} · {place.distance_meters}m · 步行 {place.walking_minutes} 分钟</div>
-              </div>
-            ))}
+          <div className="grid gap-6 md:grid-cols-2">
+            <Panel icon={Home} eyebrow="Living Quality" title="居住质量">
+              <DataRow label="整套房间数" value={numberValue(listing.total_bedrooms, "间")} />
+              <DataRow label="整套浴室数" value={numberValue(listing.total_bathrooms, "间")} />
+              <DataRow label="当前住户" value={numberValue(listing.current_occupants_count, "人")} />
+              <DataRow label="共用浴室人数" value={numberValue(listing.bathroom_shared_with_count, "人")} />
+              <DataRow label="屋主同住" value={listing.landlord_staying ? "是" : "否"} />
+              <DataRow label="最多入住" value={`${listing.max_occupants} 人`} />
+            </Panel>
+            <Panel icon={CircleDollarSign} eyebrow="Costs" title="费用说明">
+              <DataRow label="每月租金" value={`$${listing.rent_amount.toLocaleString("en-SG")}`} strong />
+              <DataRow label="押金" value={listing.deposit_amount == null ? "待补充" : `$${listing.deposit_amount.toLocaleString("en-SG")}`} />
+              <DataRow label="水电费用" value={policyLabel(listing.utilities_policy)} />
+              <DataRow label="空调费用" value={policyLabel(listing.aircon_policy)} />
+              <DataRow label="最短租期" value={`${listing.min_lease_months} 个月`} />
+              <DataRow label="中介属性" value={listing.is_agent ? "中介房源" : listing.is_owner_direct ? "屋主直租" : "待核验"} />
+            </Panel>
           </div>
-        </Panel>
-        <Panel title="联系 / 咨询">
-          {query.error === "enquiry_role" ? (
-            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-              当前账号不是租客角色，不能发送咨询。
+
+          <Panel icon={BusFront} eyebrow="NTU Commute" title="交通与通勤">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Metric icon={BusFront} label="公交到 NTU" value={minutesValue(listing.ntu_commute?.ntu_bus_minutes)} />
+              <Metric icon={Clock3} label="驾车到 NTU" value={minutesValue(listing.ntu_commute?.ntu_drive_minutes)} />
+              <Metric icon={MapPinned} label="距 NTU 直线" value={distanceValue(listing.ntu_commute?.ntu_straight_distance_km)} />
             </div>
+            <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-muted">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              通勤时间基于邮编与路线缓存估算，实际时间会受出发点、换乘和高峰交通影响。
+            </p>
+          </Panel>
+
+          <Panel icon={ShieldCheck} eyebrow="House Rules" title="居住规则">
+            <div className="grid gap-x-8 sm:grid-cols-2">
+              <DataRow label="煮饭" value={policyLabel(listing.cooking_policy)} />
+              <DataRow label="可报地址" value={listing.registration_allowed ? "可以" : "不可以"} />
+              <DataRow label="访客" value={policyLabel(listing.visitors_policy)} />
+              <DataRow label="吸烟" value={policyLabel(listing.smoking_policy)} />
+              <DataRow label="宠物" value={policyLabel(listing.pets_policy)} />
+              <DataRow label="性别偏好" value={genderLabel(listing.gender_preference)} />
+            </div>
+            <div className="mt-4">
+              <div className="text-xs font-semibold text-muted">适合人群</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {listing.tenant_type_preference.length > 0
+                  ? listing.tenant_type_preference.map((item) => <Badge key={item}>{tenantLabels[item] ?? item}</Badge>)
+                  : <Badge>人群不限</Badge>}
+              </div>
+            </div>
+          </Panel>
+
+          <Panel icon={CookingPot} eyebrow="Facilities" title="设施使用">
+            <FacilityGroup title="可使用" items={availableFacilities} icon={Check} tone="success" />
+            <FacilityGroup title="限制使用" items={restrictedFacilities} icon={Info} tone="warning" />
+            <FacilityGroup title="不可使用" items={unavailableFacilities} icon={X} tone="neutral" />
+            {facilities.length === 0 ? <p className="text-sm text-muted">设施信息待补充。</p> : null}
+          </Panel>
+
+          <Panel icon={MapPinned} eyebrow="Nearby" title="周边生活">
+            {(listing.nearby_places_cache ?? []).length > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(listing.nearby_places_cache ?? []).map((place) => (
+                  <div key={`${place.place_type}-${place.name}`} className="rounded-xl border border-line bg-slate-50/70 p-3.5">
+                    <div className="font-semibold text-ink">{place.name}</div>
+                    <div className="mt-1 text-xs text-muted">{place.place_type} · {place.distance_meters}m · 步行约 {place.walking_minutes} 分钟</div>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="text-sm text-muted">周边餐饮、超市与交通信息正在补充。</p>}
+          </Panel>
+
+          {hasSeparateRawText ? (
+            <details className="card p-5">
+              <summary className="cursor-pointer text-sm font-bold text-ink">原始信息参考</summary>
+              <p className="mt-4 whitespace-pre-line border-t border-line pt-4 text-sm leading-7 text-muted">{listing.description}</p>
+            </details>
           ) : null}
-          {profile ? (
-            <form action={createEnquiry} className="space-y-3">
-              <input type="hidden" name="listing_id" value={listing.id} />
-              <textarea name="message" rows={4} required placeholder="介绍入住人数、职业/学校、期望看房时间" />
-              <div className="grid grid-cols-2 gap-2">
-                <input type="date" name="move_in_date" />
-                <input type="number" name="lease_duration_months" placeholder="租期（月）" />
-              </div>
-              <input type="number" name="occupants_count" placeholder="入住人数" defaultValue={1} />
-              <button className="btn-primary w-full" type="submit">发送 enquiry</button>
-            </form>
-          ) : (
-            <div className="rounded-md border border-line bg-gray-50 p-4 text-sm text-muted">
-              登录后可以向房东发送咨询，未登录用户仍可查看房源和联系方式。
-              <Link className="btn-primary mt-3 w-full" href={`/auth/login?next=/rent/${listing.id}&reason=enquiry`}>
-                登录后咨询
-              </Link>
+        </div>
+
+        <aside className="lg:sticky lg:top-24 lg:self-start">
+          <section className="card overflow-hidden">
+            <div className="bg-slate-950 px-5 py-5 text-white">
+              <div className="flex items-center gap-2 text-sm font-bold"><MessageCircle className="h-4 w-4 text-teal-300" /> 联系方式 / 获取看房信息</div>
+              <p className="mt-2 text-xs leading-5 text-slate-400">建议说明入住人数、学校或职业、入住日期与预计租期。</p>
             </div>
-          )}
-          <div className="mt-4 space-y-2 text-sm text-muted">
-            {canShowContact && listing.phone ? <a className="btn-secondary w-full" href={`tel:${listing.phone}`}>电话联系：{listing.phone}</a> : null}
-            {canShowContact && listing.wechat ? <div>微信：<span className="font-semibold text-ink">{listing.wechat}</span></div> : null}
-            {!canShowContact ? <div>联系方式当前为非公开，请通过站内咨询联系。</div> : null}
-          </div>
-        </Panel>
-      </section>
+            <div className="p-5">
+              {query.error === "enquiry_role" ? (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  当前账号不是租客角色，暂时不能发送站内咨询。
+                </div>
+              ) : null}
+              {profile ? (
+                <form action={createEnquiry} className="space-y-3">
+                  <input type="hidden" name="listing_id" value={listing.id} />
+                  <textarea name="message" rows={4} required placeholder="你好，我是 NTU 学生，计划两人入住，希望预约看房……" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" name="move_in_date" aria-label="计划入住日期" />
+                    <input type="number" min="1" name="lease_duration_months" placeholder="租期（月）" />
+                  </div>
+                  <input type="number" min="1" name="occupants_count" placeholder="入住人数" defaultValue={1} />
+                  <button className="btn-primary w-full" type="submit">发送站内咨询</button>
+                </form>
+              ) : (
+                <div className="rounded-xl border border-line bg-slate-50 p-4 text-sm leading-6 text-muted">
+                  登录后可以发送咨询，并根据房源设置获取联系方式或租房群对接。
+                  <Link className="btn-primary mt-4 w-full" href={`/auth/login?next=/rent/${listing.id}&reason=enquiry`}>
+                    登录后咨询
+                  </Link>
+                </div>
+              )}
+              <div className="mt-4 space-y-2">
+                {canShowContact && listing.phone ? <a className="btn-secondary w-full" href={`tel:${listing.phone}`}>电话联系：{listing.phone}</a> : null}
+                {canShowContact && listing.wechat ? <div className="rounded-xl bg-teal-50 p-3 text-sm text-teal-900">微信：<span className="font-bold">{listing.wechat}</span></div> : null}
+                {!canShowContact ? <p className="text-xs leading-5 text-muted">联系方式受隐私设置保护，请通过站内咨询完成初步核验。</p> : null}
+              </div>
+              <div className="mt-5 border-t border-line pt-4 text-xs leading-5 text-muted">
+                信息仅供参考。看房、签约或付款前，请核验屋主身份、房屋状况与完整租约。
+              </div>
+            </div>
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }
 
-function policyLabel(value: string | null) {
-  return value ? policyLabels[value] ?? value : "未说明";
-}
-
-function formatDistance(distance_km: number) {
-  return distance_km.toFixed(1).replace(/\.0$/, "");
-}
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({
+  icon: Icon,
+  eyebrow,
+  title,
+  children
+}: {
+  icon: typeof Home;
+  eyebrow: string;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="card p-4">
-      <h2 className="mb-3 font-semibold text-ink">{title}</h2>
+    <section className="card p-5 sm:p-6">
+      <div className="mb-5 flex items-center gap-3">
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-brand"><Icon className="h-5 w-5" /></span>
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted">{eyebrow}</div>
+          <h2 className="text-lg font-bold text-ink">{title}</h2>
+        </div>
+      </div>
       {children}
     </section>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function DataRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
-    <div className="flex justify-between gap-3 border-b border-line py-2 text-sm last:border-0">
-      <dt className="text-muted">{label}</dt>
-      <dd className="font-medium text-ink">{value}</dd>
+    <div className="flex items-center justify-between gap-4 border-b border-line py-3 text-sm last:border-0">
+      <span className="text-muted">{label}</span>
+      <span className={strong ? "font-bold text-brand" : "text-right font-semibold text-ink"}>{value}</span>
     </div>
   );
 }
 
-function FacilityGroup({ title, items, muted = false }: { title: string; items: { facility_name: string; note: string | null }[]; muted?: boolean }) {
+function Metric({ icon: Icon, label, value }: { icon: typeof BusFront; label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-teal-100 bg-teal-50/70 p-4">
+      <Icon className="h-5 w-5 text-brand" />
+      <div className="mt-3 text-xs text-muted">{label}</div>
+      <div className="mt-1 font-bold text-ink">{value}</div>
+    </div>
+  );
+}
+
+function FacilityGroup({
+  title,
+  items,
+  icon: Icon,
+  tone
+}: {
+  title: string;
+  items: { facility_name: string; note: string | null }[];
+  icon: typeof Check;
+  tone: "success" | "warning" | "neutral";
+}) {
   if (items.length === 0) return null;
   return (
-    <div className="mb-4">
-      <h3 className="mb-2 text-sm font-semibold text-muted">{title}</h3>
+    <div className="mb-5 last:mb-0">
+      <div className="mb-2 text-xs font-bold text-muted">{title}</div>
       <div className="flex flex-wrap gap-2">
         {items.map((item) => (
-          <span key={item.facility_name} className={`rounded-full border px-3 py-1 text-sm ${muted ? "border-gray-200 bg-gray-50 text-muted" : "border-teal-100 bg-teal-50 text-ink"}`}>
+          <Badge key={item.facility_name} tone={tone}>
+            <Icon className="mr-1 h-3 w-3" />
             {facilityLabels[item.facility_name as keyof typeof facilityLabels] ?? item.facility_name}
-            {item.note ? `：${item.note}` : ""}
-          </span>
+            {item.note ? ` · ${item.note}` : ""}
+          </Badge>
         ))}
       </div>
     </div>
   );
+}
+
+function getReasons(listing: NonNullable<Awaited<ReturnType<typeof getListingDetail>>>) {
+  const reasons: string[] = [];
+  if ((listing.ntu_commute?.ntu_bus_minutes ?? Infinity) <= 45) reasons.push("NTU 通勤友好");
+  if (listing.registration_allowed) reasons.push("支持报地址");
+  if (!listing.landlord_staying) reasons.push("无屋主同住");
+  if (listing.cooking_policy === "full" || listing.cooking_policy === "light") reasons.push("支持煮饭");
+  if (listing.bathroom_shared_with_count != null && listing.bathroom_shared_with_count <= 2) reasons.push("共浴人数较少");
+  return reasons.length > 0 ? reasons : ["结构化信息持续补充"];
+}
+
+function policyLabel(value: string | null) {
+  return value ? policyLabels[value] ?? value : "待补充";
+}
+
+function numberValue(value: number | null, unit: string) {
+  return value == null ? "待补充" : `${value} ${unit}`;
+}
+
+function minutesValue(value: number | null | undefined) {
+  return value == null ? "待计算" : `约 ${value} 分钟`;
+}
+
+function distanceValue(value: number | null | undefined) {
+  return value == null ? "待计算" : `约 ${value.toFixed(1).replace(/\.0$/, "")} km`;
+}
+
+function genderLabel(value: string) {
+  if (value === "any") return "不限";
+  if (value === "male") return "男性";
+  if (value === "female") return "女性";
+  return value || "待补充";
 }

@@ -5,10 +5,22 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#172033",
-        muted: "#667085",
-        line: "#e4e7ec",
-        brand: "#0f766e"
+        ink: "#14211f",
+        muted: "#667773",
+        line: "#dce7e3",
+        brand: {
+          DEFAULT: "#0f766e",
+          dark: "#0b5f59",
+          light: "#e8f5f2"
+        },
+        surface: "#f7faf9"
+      },
+      borderRadius: {
+        "2xl": "1.25rem"
+      },
+      boxShadow: {
+        card: "0 12px 36px -24px rgba(15, 73, 67, 0.35)",
+        lift: "0 20px 50px -28px rgba(15, 73, 67, 0.45)"
       }
     }
   },

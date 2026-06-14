@@ -4,35 +4,75 @@
 
 :root {
   color-scheme: light;
+  font-synthesis: none;
+}
+
+* {
+  @apply border-line;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: #f7f8fa;
-  color: #172033;
+  @apply min-h-screen bg-surface text-ink antialiased;
+  background-image:
+    radial-gradient(circle at 12% 0%, rgba(20, 184, 166, 0.09), transparent 28rem),
+    radial-gradient(circle at 88% 8%, rgba(16, 185, 129, 0.07), transparent 24rem),
+    linear-gradient(rgba(255, 255, 255, 0.72), rgba(247, 250, 249, 0.94));
+}
+
+::selection {
+  @apply bg-teal-200 text-teal-950;
 }
 
 input,
 select,
 textarea {
-  @apply w-full rounded-md border border-line bg-white px-3 py-2 text-sm outline-none ring-brand/20 transition focus:border-brand focus:ring-4;
+  @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm text-ink shadow-sm outline-none ring-brand/15 transition placeholder:text-slate-400 focus:border-brand focus:ring-4;
+}
+
+textarea {
+  @apply resize-y;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  @apply h-4 w-4 accent-brand shadow-none;
 }
 
 label {
-  @apply text-sm font-medium text-ink;
+  @apply text-sm font-semibold text-ink;
 }
 
 .btn-primary {
-  @apply inline-flex items-center justify-center rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50;
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-md focus:outline-none focus:ring-4 focus:ring-brand/20 disabled:cursor-not-allowed disabled:opacity-50;
 }
 
 .btn-secondary {
-  @apply inline-flex items-center justify-center rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold text-ink transition hover:bg-gray-50;
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-semibold text-ink shadow-sm transition hover:-translate-y-0.5 hover:border-teal-200 hover:bg-teal-50 focus:outline-none focus:ring-4 focus:ring-brand/10;
 }
 
 .card {
-  @apply rounded-lg border border-line bg-white;
+  @apply rounded-2xl border border-white/80 bg-white shadow-card ring-1 ring-slate-900/[0.04];
 }
 
 .container-page {
-  @apply mx-auto w-full max-w-6xl px-4;
+  @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+}
+
+.section-title {
+  @apply text-xl font-bold tracking-tight text-ink sm:text-2xl;
+}
+
+.eyebrow {
+  @apply text-xs font-bold uppercase tracking-[0.16em] text-brand;
+}
+
+.subtle-grid {
+  background-image:
+    linear-gradient(rgba(15, 118, 110, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 118, 110, 0.035) 1px, transparent 1px);
+  background-size: 28px 28px;
 }

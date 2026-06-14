@@ -24,7 +24,9 @@ export default async function NewListingPage({ searchParams }: { searchParams: P
     <div className="mx-auto max-w-4xl space-y-5 px-4 py-6">
       <div>
         <h1 className="text-2xl font-bold text-ink">发布房源</h1>
-        <p className="mt-2 text-sm text-muted">按步骤填写核心信息、居住质量、规则、设施和图片。提交后进入 pending_review，等待平台审核。</p>
+        <p className="mt-2 text-sm text-muted">
+          先填写核心信息，平台会帮你整理成更适合租客看的房源页。联系方式默认不公开，通过整理后再按你的选择展示。
+        </p>
       </div>
       {!profile ? (
         <div className="card p-6 text-center">
