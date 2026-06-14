@@ -19,10 +19,6 @@ export default async function RentPage({
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-4 py-6">
-      <div>
-        <h1 className="text-2xl font-bold text-ink">新加坡租房</h1>
-        <p className="mt-2 text-sm text-muted">同时展示正式发布房源与网络整理候选房源。</p>
-      </div>
       <SearchFilters searchParams={params} />
       <div className="text-sm text-muted">找到 {listings.length} 套房源</div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

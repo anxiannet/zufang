@@ -30,7 +30,10 @@ export default async function AdminListingsPage({
           <h1 className="text-2xl font-bold text-ink">正式房源管理</h1>
           <p className="mt-2 text-sm text-muted">编辑 listings 结构化详情，发布、下架、拒绝或标记已出租。</p>
         </div>
-        <Link href="/admin" className="btn-secondary">返回后台</Link>
+        <div className="flex gap-2">
+          <Link href="/admin/listings/new" className="btn-primary">发布房源</Link>
+          <Link href="/admin" className="btn-secondary">返回后台</Link>
+        </div>
       </div>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

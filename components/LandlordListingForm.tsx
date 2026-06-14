@@ -1,22 +1,76 @@
 "use client";
 
-import { useState } from "react";
-import { createListing } from "@/actions/listings";
+import { startTransition, useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createListing, type CreateListingState } from "@/actions/listings";
 import { getSingaporeDateInputValue } from "@/lib/dateTime";
 import { facilities, facilityLabels, type UserRole } from "@/lib/types";
 
 const steps = ["核心信息", "居住质量", "规则限制", "设施", "图片"];
+const initialState: CreateListingState = {
+  status: "idle",
+  error: null,
+  step: null,
+  listing_id: null
+};
+const errorMessages: Record<string, string> = {
+  session_expired: "登录状态已失效。你填写的内容仍保留在当前页面，请重新登录后再提交。",
+  listing_role: "当前账号角色不能发布房源。",
+  missing_title: "请填写标题。",
+  missing_postal_code: "请填写邮编。",
+  missing_rent_amount: "请填写租金。",
+  missing_available_from: "请填写可入住日期。",
+  missing_room_type: "房间或床位房源需要选择房间类型。",
+  create_failed: "创建房源失败，请检查表单内容后再提交。你填写的内容已保留。",
+  image_count: "最多只能上传 6 张图片。",
+  image_type: "图片仅支持 JPG、PNG 和 WebP 格式。",
+  image_size: "每张图片不能超过 5MB。",
+  image_upload: "图片上传失败，请稍后重试。你填写的内容已保留。"
+};
 
-export function LandlordListingForm({ role }: { role: UserRole }) {
+export function LandlordListingForm({
+  role,
+  adminMode = false
+}: {
+  role: UserRole;
+  adminMode?: boolean;
+}) {
+  const router = useRouter();
+  const [submitState, submitAction, isPending] = useActionState(createListing, initialState);
   const [step, setStep] = useState(0);
   const [imageRows, setImageRows] = useState([0]);
   const [description, setDescription] = useState("");
   const [descriptionClean, setDescriptionClean] = useState("");
   const [cleanEdited, setCleanEdited] = useState(false);
   const isAdmin = role === "admin";
+  const canSetModerationFields = isAdmin && adminMode;
+
+  useEffect(() => {
+    if (submitState.status === "error" && submitState.step !== null) {
+      setStep(submitState.step);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    if (submitState.status === "success" && submitState.listing_id) {
+      router.push(`/rent/${submitState.listing_id}`);
+    }
+  }, [router, submitState]);
 
   return (
-    <form action={createListing} className="card space-y-6 p-4 md:p-6">
+    <form
+      className="card space-y-6 p-4 md:p-6"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        startTransition(() => submitAction(formData));
+      }}
+    >
+      {canSetModerationFields ? <input type="hidden" name="admin_mode" value="true" /> : null}
+      {submitState.status === "error" && submitState.error ? (
+        <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {errorMessages[submitState.error] ?? "提交失败，请稍后重试。你填写的内容已保留。"}
+        </div>
+      ) : null}
       <div className="flex gap-2 overflow-x-auto">
         {steps.map((label, index) => (
           <button
@@ -32,7 +86,7 @@ export function LandlordListingForm({ role }: { role: UserRole }) {
 
       <section className={step === 0 ? "grid gap-4 md:grid-cols-2" : "hidden"}>
           <Field name="title" label="标题" placeholder="近 Tampines MRT 普通房，可报地址" />
-          <Select name="listing_type" label="房源类型" options={[["room", "单间"], ["whole_unit", "整套"], ["bedspace", "床位"]]} />
+          <Select name="listing_type" label="房源类型" options={[["room", "房间"], ["whole_unit", "整套"], ["bedspace", "床位"]]} />
           <Select name="room_type" label="房间类型（整套不适用；床位请选择所在房间）" emptyLabel="整套不适用 / 请选择" options={[["master_room", "主人房"], ["common_room", "普通房"], ["partition_room", "隔间"], ["maid_room", "佣人房"], ["studio", "Studio公寓"]]} />
           <Field name="rent_amount" label="租金 SGD/月" type="number" />
           <Field name="deposit_amount" label="押金 SGD" type="number" />
@@ -43,8 +97,8 @@ export function LandlordListingForm({ role }: { role: UserRole }) {
           <Select name="contact_visibility" label="联系方式可见范围" defaultValue="private" options={[["private", "不公开"], ["login_only", "登录后可见"], ["public", "公开"], ["group_only", "指定群体可见"]]} />
           <Field name="wechat" label="微信" />
           <Field name="phone" label="电话" />
-          {isAdmin ? <Select name="source" label="来源" defaultValue="owner_submit" options={[["owner_submit", "屋主提交"], ["wechat_group", "微信群"], ["zufang", "狮城论坛"], ["xiaohongshu", "小红书"], ["manual", "管理员录入"]]} /> : <input type="hidden" name="source" value="owner_submit" />}
-          {isAdmin ? <Select name="verification_status" label="认证状态" defaultValue="unverified" options={[["unverified", "未认证"], ["owner_verified", "屋主已认证"], ["agent_verified", "中介已认证"], ["suspicious", "可疑"], ["rejected", "拒绝"]]} /> : <input type="hidden" name="verification_status" value="unverified" />}
+          {canSetModerationFields ? <Select name="source" label="来源" defaultValue="owner_submit" options={[["owner_submit", "屋主提交"], ["wechat_group", "微信群"], ["zufang", "狮城论坛"], ["xiaohongshu", "小红书"], ["manual", "管理员录入"]]} /> : <input type="hidden" name="source" value="owner_submit" />}
+          {canSetModerationFields ? <Select name="verification_status" label="认证状态" defaultValue="unverified" options={[["unverified", "未认证"], ["owner_verified", "屋主已认证"], ["agent_verified", "中介已认证"], ["suspicious", "可疑"], ["rejected", "拒绝"]]} /> : <input type="hidden" name="verification_status" value="unverified" />}
       </section>
 
       <section className={step === 1 ? "grid gap-4 md:grid-cols-2" : "hidden"}>
@@ -105,11 +159,15 @@ export function LandlordListingForm({ role }: { role: UserRole }) {
               placeholder="补充交通、生活便利、合租氛围等。"
             />
           </div>
-          <div>
-            <label htmlFor="description_clean">清理后的公开描述</label>
-            <textarea id="description_clean" name="description_clean" rows={4} value={descriptionClean} onChange={(event) => { setCleanEdited(true); setDescriptionClean(event.target.value); }} />
-          </div>
-          {isAdmin ? <div><label htmlFor="internal_note">内部备注（仅管理员）</label><textarea id="internal_note" name="internal_note" rows={3} /></div> : null}
+          {canSetModerationFields ? (
+            <div>
+              <label htmlFor="description_clean">清理后的公开描述</label>
+              <textarea id="description_clean" name="description_clean" rows={4} value={descriptionClean} onChange={(event) => { setCleanEdited(true); setDescriptionClean(event.target.value); }} />
+            </div>
+          ) : (
+            <input type="hidden" name="description_clean" value={descriptionClean} />
+          )}
+          {canSetModerationFields ? <div><label htmlFor="internal_note">内部备注（仅管理员）</label><textarea id="internal_note" name="internal_note" rows={3} /></div> : null}
       </section>
 
       <section className={step === 3 ? "space-y-3" : "hidden"}>
@@ -127,17 +185,32 @@ export function LandlordListingForm({ role }: { role: UserRole }) {
       </section>
 
       <section className={step === 4 ? "space-y-3" : "hidden"}>
-          <p className="text-sm text-muted">支持先填写已上传图片 URL；提交后也可通过 uploadListingImage action 接入 Supabase Storage 上传。</p>
+          <p className="text-sm text-muted">最多上传 6 张图片，每张不超过 5MB，支持 JPG、PNG 和 WebP。</p>
           {imageRows.map((row, index) => (
-            <div key={row} className="grid gap-2 rounded-md border border-line p-3 md:grid-cols-[1fr_100px_1fr]">
-              <input name="image_url" placeholder="Supabase Storage public URL" />
-              <input name={`image_sort_${index}`} type="number" defaultValue={index} />
-              <input name={`image_caption_${index}`} placeholder="图片说明" />
+            <div key={row} className="grid gap-2 rounded-md border border-line p-3 md:grid-cols-[1fr_1fr_auto]">
+              <input
+                name="image_file"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                aria-label={`房源图片 ${index + 1}`}
+              />
+              <input name={`image_caption_${index}`} placeholder="图片说明，例如：主人房" />
+              {imageRows.length > 1 ? (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setImageRows((rows) => rows.filter((item) => item !== row))}
+                >
+                  移除
+                </button>
+              ) : null}
             </div>
           ))}
-          <button type="button" className="btn-secondary" onClick={() => setImageRows((rows) => [...rows, rows.length])}>
-            添加图片
-          </button>
+          {imageRows.length < 6 ? (
+            <button type="button" className="btn-secondary" onClick={() => setImageRows((rows) => [...rows, Math.max(...rows) + 1])}>
+              添加图片
+            </button>
+          ) : null}
       </section>
 
       <div className="flex justify-between border-t border-line pt-4">
@@ -145,7 +218,9 @@ export function LandlordListingForm({ role }: { role: UserRole }) {
         {step < steps.length - 1 ? (
           <button type="button" className="btn-primary" onClick={() => setStep((value) => Math.min(steps.length - 1, value + 1))}>下一步</button>
         ) : (
-          <button type="submit" className="btn-primary">提交审核</button>
+          <button type="submit" className="btn-primary disabled:cursor-not-allowed disabled:opacity-60" disabled={isPending}>
+            {isPending ? "提交中..." : "提交审核"}
+          </button>
         )}
       </div>
     </form>

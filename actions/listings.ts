@@ -31,15 +31,42 @@ function nullableText(formData: FormData, key: string) {
   return text(formData, key) || null;
 }
 
-export async function createListing(formData: FormData) {
+const allowedImageTypes = new Map([
+  ["image/jpeg", "jpg"],
+  ["image/png", "png"],
+  ["image/webp", "webp"]
+]);
+const maxImageCount = 6;
+const maxImageSize = 5 * 1024 * 1024;
+
+export type CreateListingState = {
+  status: "idle" | "error" | "success";
+  error: string | null;
+  step: number | null;
+  listing_id: string | null;
+};
+
+function createListingError(error: string, step: number): CreateListingState {
+  return {
+    status: "error",
+    error,
+    step,
+    listing_id: null
+  };
+}
+
+export async function createListing(
+  _previousState: CreateListingState,
+  formData: FormData
+): Promise<CreateListingState> {
   const profile = await getCurrentProfile();
 
   if (!profile) {
-    redirect("/auth/login?next=/landlord/listings/new&reason=listing");
+    return createListingError("session_expired", 4);
   }
 
   if (!["landlord", "agent", "admin"].includes(profile.role)) {
-    redirect("/landlord/listings/new?error=listing_role");
+    return createListingError("listing_role", 4);
   }
 
   const supabase = await createClient();
@@ -49,16 +76,25 @@ export async function createListing(formData: FormData) {
   const availableFrom = text(formData, "available_from");
   const listingType = text(formData, "listing_type", "room");
   const roomType = nullableText(formData, "room_type");
+  const isAdminMode = profile.role === "admin" && text(formData, "admin_mode") === "true";
+  const imageFiles = formData
+    .getAll("image_file")
+    .map((value, formIndex) => ({ value, formIndex }))
+    .filter((item): item is { value: File; formIndex: number } => item.value instanceof File && item.value.size > 0);
 
-  const validationErrors = new URLSearchParams();
-  if (!title) validationErrors.set("missing", "title");
-  else if (!postalCode) validationErrors.set("missing", "postal_code");
-  else if (!rentAmount) validationErrors.set("missing", "rent_amount");
-  else if (!availableFrom) validationErrors.set("missing", "available_from");
-  else if (listingType !== "whole_unit" && !roomType) validationErrors.set("missing", "room_type");
-
-  if (validationErrors.size > 0) {
-    redirect(`/landlord/listings/new?${validationErrors.toString()}`);
+  if (!title) return createListingError("missing_title", 0);
+  if (!postalCode) return createListingError("missing_postal_code", 0);
+  if (!rentAmount) return createListingError("missing_rent_amount", 0);
+  if (!availableFrom) return createListingError("missing_available_from", 0);
+  if (listingType !== "whole_unit" && !roomType) return createListingError("missing_room_type", 0);
+  if (imageFiles.length > maxImageCount) {
+    return createListingError("image_count", 4);
+  }
+  if (imageFiles.some(({ value }) => !allowedImageTypes.has(value.type))) {
+    return createListingError("image_type", 4);
+  }
+  if (imageFiles.some(({ value }) => value.size > maxImageSize)) {
+    return createListingError("image_size", 4);
   }
 
   const isAdmin = profile.role === "admin";
@@ -88,14 +124,14 @@ export async function createListing(formData: FormData) {
       bathroom_shared_with_count: intValue(formData, "bathroom_shared_with_count"),
       description,
       description_clean: nullableText(formData, "description_clean") ?? description,
-      source: isAdmin ? text(formData, "source", "owner_submit") : "owner_submit",
+      source: isAdminMode ? text(formData, "source", "owner_submit") : "owner_submit",
       contact_visibility: text(formData, "contact_visibility", "private"),
       wechat: nullableText(formData, "wechat"),
       phone: nullableText(formData, "phone"),
       is_owner_direct: boolValue(formData, "is_owner_direct"),
       is_agent: boolValue(formData, "is_agent"),
       is_sublet: boolValue(formData, "is_sublet"),
-      verification_status: isAdmin ? text(formData, "verification_status", "unverified") : "unverified",
+      verification_status: isAdminMode ? text(formData, "verification_status", "unverified") : "unverified",
       utilities_policy: nullableText(formData, "utilities_policy"),
       aircon_policy: nullableText(formData, "aircon_policy"),
       cooking_policy: nullableText(formData, "cooking_policy"),
@@ -109,7 +145,7 @@ export async function createListing(formData: FormData) {
     .single();
 
   if (error || !listing) {
-    redirect(`/landlord/listings/new?error=create_failed`);
+    return createListingError("create_failed", 0);
   }
 
   const facilityRows = facilities.map((facility) => ({
@@ -119,23 +155,56 @@ export async function createListing(formData: FormData) {
     note: text(formData, `facility_note_${facility}`) || null
   }));
 
-  const imageUrls = formData
-    .getAll("image_url")
-    .map((value) => String(value).trim())
-    .filter(Boolean);
+  const { error: facilityInsertError } = await supabase.from("listing_facilities").insert(facilityRows);
+  if (facilityInsertError) {
+    await supabase.from("listings").delete().eq("id", listing.id);
+    return createListingError("create_failed", 3);
+  }
 
-  const imageRows = imageUrls.map((image_url, index) => ({
-    listing_id: listing.id,
-    image_url,
-    sort_order: Number(formData.get(`image_sort_${index}`) ?? index),
-    caption: text(formData, `image_caption_${index}`) || null
-  }));
+  const uploadedPaths: string[] = [];
+  const imageRows = [];
 
-  await supabase.from("listing_facilities").insert(facilityRows);
-  if (imageRows.length > 0) await supabase.from("listing_images").insert(imageRows);
+  for (const [index, { value: file, formIndex }] of imageFiles.entries()) {
+    const extension = allowedImageTypes.get(file.type)!;
+    const path = `${listing.id}/${crypto.randomUUID()}.${extension}`;
+    const { error: uploadError } = await supabase.storage
+      .from("listing-images")
+      .upload(path, file, { contentType: file.type, upsert: false });
+
+    if (uploadError) {
+      if (uploadedPaths.length > 0) {
+        await supabase.storage.from("listing-images").remove(uploadedPaths);
+      }
+      await supabase.from("listings").delete().eq("id", listing.id);
+      return createListingError("image_upload", 4);
+    }
+
+    uploadedPaths.push(path);
+    const { data } = supabase.storage.from("listing-images").getPublicUrl(path);
+    imageRows.push({
+      listing_id: listing.id,
+      image_url: data.publicUrl,
+      sort_order: index,
+      caption: text(formData, `image_caption_${formIndex}`) || null
+    });
+  }
+
+  if (imageRows.length > 0) {
+    const { error: imageInsertError } = await supabase.from("listing_images").insert(imageRows);
+    if (imageInsertError) {
+      await supabase.storage.from("listing-images").remove(uploadedPaths);
+      await supabase.from("listings").delete().eq("id", listing.id);
+      return createListingError("image_upload", 4);
+    }
+  }
 
   revalidatePath("/rent");
-  redirect(`/rent/${listing.id}`);
+  return {
+    status: "success",
+    error: null,
+    step: null,
+    listing_id: listing.id
+  };
 }
 
 export async function updateListing(listingId: string, formData: FormData) {

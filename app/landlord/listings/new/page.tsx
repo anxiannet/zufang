@@ -12,6 +12,13 @@ export default async function NewListingPage({ searchParams }: { searchParams: P
     rent_amount: "租金",
     available_from: "可入住日期"
   };
+  const errorMessages: Record<string, string> = {
+    create_failed: "创建房源失败，请检查表单内容后再提交。",
+    image_count: "最多只能上传 6 张图片。",
+    image_type: "图片仅支持 JPG、PNG 和 WebP 格式。",
+    image_size: "每张图片不能超过 5MB。",
+    image_upload: "图片上传失败，请稍后重试。"
+  };
 
   return (
     <div className="mx-auto max-w-4xl space-y-5 px-4 py-6">
@@ -38,9 +45,9 @@ export default async function NewListingPage({ searchParams }: { searchParams: P
               请先填写必填项：{missingLabels[missing] ?? missing}
             </div>
           ) : null}
-          {params.error === "create_failed" ? (
+          {typeof params.error === "string" && errorMessages[params.error] ? (
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              创建房源失败，请检查表单内容后再提交。
+              {errorMessages[params.error]}
             </div>
           ) : null}
           {params.error === "listing_role" ? (
