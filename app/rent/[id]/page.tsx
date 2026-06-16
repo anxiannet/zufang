@@ -60,11 +60,13 @@ export default async function ListingDetailPage({
   const listing = await getListingDetail(id);
   if (!listing) notFound();
   const profile = await getCurrentProfile();
+  const isCandidate = listing.detail_source === "candidate";
   const facilities = listing.listing_facilities ?? [];
+  const tenantPreferences = Array.isArray(listing.tenant_type_preference) ? listing.tenant_type_preference : [];
   const availableFacilities = facilities.filter((item) => item.availability === "available");
   const restrictedFacilities = facilities.filter((item) => item.availability === "restricted");
   const unavailableFacilities = facilities.filter((item) => item.availability === "not_available");
-  const canShowContact = listing.contact_visibility === "public" || (listing.contact_visibility === "login_only" && Boolean(profile));
+  const canShowContact = !isCandidate && (listing.contact_visibility === "public" || (listing.contact_visibility === "login_only" && Boolean(profile)));
   const polishedDescription = listing.description_clean || listing.description;
   const hasSeparateRawText = Boolean(listing.description && listing.description.trim() !== listing.description_clean?.trim());
 
@@ -93,16 +95,16 @@ export default async function ListingDetailPage({
               <DataRow label="整套浴室数" value={numberValue(listing.total_bathrooms, "间")} />
               <DataRow label="当前住户" value={numberValue(listing.current_occupants_count, "人")} />
               <DataRow label="共用浴室人数" value={numberValue(listing.bathroom_shared_with_count, "人")} />
-              <DataRow label="屋主同住" value={listing.landlord_staying ? "是" : "否"} />
-              <DataRow label="最多入住" value={`${listing.max_occupants} 人`} />
+              <DataRow label="屋主同住" value={booleanLabel(listing.landlord_staying)} />
+              <DataRow label="最多入住" value={numberValue(listing.max_occupants, "人")} />
             </Panel>
             <Panel icon={CircleDollarSign} eyebrow="Costs" title="费用说明">
               <DataRow label="每月租金" value={`$${listing.rent_amount.toLocaleString("en-SG")}`} strong />
               <DataRow label="押金" value={listing.deposit_amount == null ? "待补充" : `$${listing.deposit_amount.toLocaleString("en-SG")}`} />
               <DataRow label="水电费用" value={policyLabel(listing.utilities_policy)} />
               <DataRow label="空调费用" value={policyLabel(listing.aircon_policy)} />
-              <DataRow label="最短租期" value={`${listing.min_lease_months} 个月`} />
-              <DataRow label="中介属性" value={listing.is_agent ? "中介房源" : listing.is_owner_direct ? "屋主直租" : "待核验"} />
+              <DataRow label="最短租期" value={numberValue(listing.min_lease_months, "个月")} />
+              <DataRow label="中介属性" value={listing.is_agent === true ? "中介房源" : listing.is_owner_direct === true ? "屋主直租" : listing.is_agent === false && listing.is_owner_direct === false ? "非中介 / 非直租" : "待补充"} />
             </Panel>
           </div>
 
@@ -121,7 +123,7 @@ export default async function ListingDetailPage({
           <Panel icon={ShieldCheck} eyebrow="House Rules" title="居住规则">
             <div className="grid gap-x-8 sm:grid-cols-2">
               <DataRow label="煮饭" value={policyLabel(listing.cooking_policy)} />
-              <DataRow label="可报地址" value={listing.registration_allowed ? "可以" : "不可以"} />
+              <DataRow label="可报地址" value={booleanLabel(listing.registration_allowed, "可以", "不可以")} />
               <DataRow label="访客" value={policyLabel(listing.visitors_policy)} />
               <DataRow label="吸烟" value={policyLabel(listing.smoking_policy)} />
               <DataRow label="宠物" value={policyLabel(listing.pets_policy)} />
@@ -130,9 +132,9 @@ export default async function ListingDetailPage({
             <div className="mt-4">
               <div className="text-xs font-semibold text-muted">适合人群</div>
               <div className="mt-2 flex flex-wrap gap-2">
-                {listing.tenant_type_preference.length > 0
-                  ? listing.tenant_type_preference.map((item) => <Badge key={item}>{tenantLabels[item] ?? item}</Badge>)
-                  : <Badge>人群不限</Badge>}
+                {tenantPreferences.length > 0
+                  ? tenantPreferences.map((item) => <Badge key={item}>{tenantLabels[item] ?? item}</Badge>)
+                  : <Badge>待补充</Badge>}
               </div>
             </div>
           </Panel>
@@ -177,7 +179,20 @@ export default async function ListingDetailPage({
                   当前账号不是租客角色，暂时不能发送站内咨询。
                 </div>
               ) : null}
-              {profile ? (
+              {isCandidate ? (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+                    这是维界整理的网络候选信息，尚未完成屋主身份与房源真实性核验。请勿在核验前支付订金。
+                  </div>
+                  {listing.source_url ? (
+                    <a className="btn-primary w-full" href={listing.source_url} target="_blank" rel="noreferrer">
+                      查看原始来源
+                    </a>
+                  ) : (
+                    <div className="rounded-xl bg-slate-50 p-4 text-sm text-muted">原始来源链接暂不可用。</div>
+                  )}
+                </div>
+              ) : profile ? (
                 <form action={createEnquiry} className="space-y-3">
                   <input type="hidden" name="listing_id" value={listing.id} />
                   <textarea name="message" rows={4} required placeholder="你好，我是 NTU 学生，计划两人入住，希望预约看房……" />
@@ -199,7 +214,7 @@ export default async function ListingDetailPage({
               <div className="mt-4 space-y-2">
                 {canShowContact && listing.phone ? <a className="btn-secondary w-full" href={`tel:${listing.phone}`}>电话联系：{listing.phone}</a> : null}
                 {canShowContact && listing.wechat ? <div className="rounded-xl bg-teal-50 p-3 text-sm text-teal-900">微信：<span className="font-bold">{listing.wechat}</span></div> : null}
-                {!canShowContact ? <p className="text-xs leading-5 text-muted">联系方式受隐私设置保护，请通过站内咨询完成初步核验。</p> : null}
+                {!isCandidate && !canShowContact ? <p className="text-xs leading-5 text-muted">联系方式受隐私设置保护，请通过站内咨询完成初步核验。</p> : null}
               </div>
               <div className="mt-5 border-t border-line pt-4 text-xs leading-5 text-muted">
                 信息仅供参考。看房、签约或付款前，请核验屋主身份、房屋状况与完整租约。
@@ -288,7 +303,7 @@ function getReasons(listing: NonNullable<Awaited<ReturnType<typeof getListingDet
   const reasons: string[] = [];
   if ((listing.ntu_commute?.ntu_bus_minutes ?? Infinity) <= 45) reasons.push("NTU 通勤友好");
   if (listing.registration_allowed) reasons.push("支持报地址");
-  if (!listing.landlord_staying) reasons.push("无屋主同住");
+  if (listing.landlord_staying === false) reasons.push("无屋主同住");
   if (listing.cooking_policy === "full" || listing.cooking_policy === "light") reasons.push("支持煮饭");
   if (listing.bathroom_shared_with_count != null && listing.bathroom_shared_with_count <= 2) reasons.push("共浴人数较少");
   return reasons.length > 0 ? reasons : ["结构化信息持续补充"];
@@ -298,7 +313,7 @@ function policyLabel(value: string | null) {
   return value ? policyLabels[value] ?? value : "待补充";
 }
 
-function numberValue(value: number | null, unit: string) {
+function numberValue(value: number | null | undefined, unit: string) {
   return value == null ? "待补充" : `${value} ${unit}`;
 }
 
@@ -310,9 +325,14 @@ function distanceValue(value: number | null | undefined) {
   return value == null ? "待计算" : `约 ${value.toFixed(1).replace(/\.0$/, "")} km`;
 }
 
-function genderLabel(value: string) {
+function genderLabel(value: string | null) {
   if (value === "any") return "不限";
   if (value === "male") return "男性";
   if (value === "female") return "女性";
   return value || "待补充";
+}
+
+function booleanLabel(value: boolean | null | undefined, trueLabel = "是", falseLabel = "否") {
+  if (value == null) return "待补充";
+  return value ? trueLabel : falseLabel;
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { ShieldCheck } from "lucide-react";
 
 export function Footer() {
@@ -6,7 +7,14 @@ export function Footer() {
     <footer className="mt-16 border-t border-line bg-slate-950 text-slate-300">
       <div className="container-page grid gap-8 py-10 md:grid-cols-[1.4fr_1fr_1fr]">
         <div>
-          <div className="text-lg font-bold text-white">维界租房</div>
+          <Image
+            src="/brand/weijie-logo-full.png"
+            alt="维界 WEIJIE"
+            width={144}
+            height={126}
+            className="h-auto w-28 brightness-125 sm:w-32"
+          />
+          <div className="mt-3 text-lg font-bold text-white">维界租房</div>
           <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">
             面向新加坡华人学生与屋主的结构化租房信息平台，重点整理 NTU 通勤、居住关系和真实生活条件。
           </p>

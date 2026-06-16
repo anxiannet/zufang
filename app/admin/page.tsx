@@ -2,6 +2,8 @@ import { appointAdmin, publishListing, rejectListing, unpublishListing, updateLi
 import { getCurrentProfile } from "@/lib/auth";
 import { formatSingaporeDate } from "@/lib/dateTime";
 import Link from "next/link";
+import { AlertTriangle, Database, FileSearch, Gauge, ShieldCheck, Users } from "lucide-react";
+import { PageHeader } from "@/components/ui/PageHeader";
 
 export default async function AdminPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const profile = await getCurrentProfile();
@@ -35,14 +37,21 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   return (
     <AdminShell>
-      <div>
-        <h1 className="text-2xl font-bold text-ink">后台管理</h1>
-        <p className="mt-2 text-sm text-muted">审核房源、查看用户和咨询记录，并发现缺图片、价格异常、地址不完整的房源。</p>
-      </div>
+      <PageHeader
+        eyebrow="Operations Console"
+        title="维界运营后台"
+        description="集中审核房源、管理采集与候选数据，并检查平台内容完整度。"
+        actions={<Link href="/admin/listings/new" className="btn-primary">录入正式房源</Link>}
+      />
 
-      <section className="card p-4">
-        <h2 className="font-semibold text-ink">管理员权限</h2>
-        <p className="mt-1 text-sm text-muted">输入已注册用户邮箱，将该用户设置为 admin。</p>
+      <section className="card p-5 sm:p-6">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-brand"><ShieldCheck className="h-5 w-5" /></span>
+          <div>
+            <h2 className="font-bold text-ink">管理员权限</h2>
+            <p className="text-sm text-muted">为已注册用户分配管理员角色。</p>
+          </div>
+        </div>
         {typeof params.admin_success === "string" ? (
           <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
             已将 {params.admin_success} 设置为管理员。
@@ -59,10 +68,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </form>
       </section>
 
-      <section className="card p-4">
+      <section className="card p-5 sm:p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="font-semibold text-ink">采集数据</h2>
+            <h2 className="flex items-center gap-2 font-bold text-ink"><Database className="h-4 w-4 text-brand" /> 数据工作区</h2>
             <p className="mt-1 text-sm text-muted">查看抓取记录、筛选来源和区域、检查原始文本与联系方式。</p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -74,10 +83,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </div>
       </section>
 
-      <section className="card p-4">
+      <section className="card p-5 sm:p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="font-semibold text-ink">房源导入流程</h2>
+            <h2 className="flex items-center gap-2 font-bold text-ink"><Gauge className="h-4 w-4 text-brand" /> 房源导入流程</h2>
             <p className="mt-1 text-sm text-muted">原始采集数据先进入候选层，人工审核后再导入正式 listings 草稿。</p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -88,9 +97,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       </section>
 
       <section className="grid gap-3 md:grid-cols-3">
-        <AdminNavCard href="/admin/ingestion" title="原始采集层" description="查看 ingestion_listings 原始抓取数据。" />
-        <AdminNavCard href="/admin/listing-imports" title="候选审核层" description="修正结构化字段、批准、拒绝或标记重复。" />
-        <AdminNavCard href="/admin/listings" title="正式房源" description="编辑房源详情、发布、下架、拒绝或标记已出租。" />
+        <AdminNavCard href="/admin/ingestion" title="原始采集层" description="查看 ingestion_listings 原始抓取数据。" icon={Database} />
+        <AdminNavCard href="/admin/listing-imports" title="候选审核层" description="修正结构化字段、批准、拒绝或标记重复。" icon={FileSearch} />
+        <AdminNavCard href="/admin/listings" title="正式房源" description="编辑房源详情、发布、下架、拒绝或标记已出租。" icon={ShieldCheck} />
       </section>
 
       <section className="card p-4">
@@ -140,7 +149,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               </div>
             </div>
           ))}
-          {dashboard.pending.length === 0 ? <div className="text-sm text-muted">暂无待审核房源。</div> : null}
+          {dashboard.pending.length === 0 ? <AdminEmpty icon={ShieldCheck} text="暂无待审核房源" /> : null}
         </div>
       </section>
 
@@ -152,6 +161,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               <div className="text-muted">{user.phone ?? "-"} · WhatsApp {user.whatsapp ?? "-"}</div>
             </div>
           ))}
+          {dashboard.users.length === 0 ? <AdminEmpty icon={Users} text="暂无用户记录" /> : null}
         </Panel>
 
         <Panel title="咨询记录">
@@ -161,6 +171,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               <div className="line-clamp-2 text-muted">{enquiry.message}</div>
             </div>
           ))}
+          {dashboard.enquiries.length === 0 ? <AdminEmpty icon={FileSearch} text="暂无咨询记录" /> : null}
         </Panel>
       </section>
 
@@ -174,6 +185,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               <div className="text-xs text-muted">来源 {listing.source} · 认证 {listing.verification_status}</div>
             </div>
           ))}
+          {dashboard.anomalies.length === 0 ? <AdminEmpty icon={AlertTriangle} text="当前没有异常房源" /> : null}
         </div>
       </section>
     </AdminShell>
@@ -181,7 +193,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 }
 
 function AdminShell({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto max-w-6xl space-y-5 px-4 py-6">{children}</div>;
+  return <div className="container-page space-y-5 py-8 sm:py-10">{children}</div>;
 }
 
 function adminErrorMessage(code: string) {
@@ -204,11 +216,20 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function AdminNavCard({ href, title, description }: { href: string; title: string; description: string }) {
+function AdminNavCard({ href, title, description, icon: Icon }: { href: string; title: string; description: string; icon: typeof Database }) {
   return (
-    <Link href={href} className="card block p-4 transition hover:-translate-y-0.5 hover:shadow-md">
-      <div className="font-semibold text-ink">{title}</div>
+    <Link href={href} className="card block p-5 transition hover:-translate-y-1 hover:border-teal-100 hover:shadow-lift">
+      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-teal-50 text-brand"><Icon className="h-4 w-4" /></span>
+      <div className="mt-4 font-semibold text-ink">{title}</div>
       <p className="mt-2 text-sm text-muted">{description}</p>
     </Link>
+  );
+}
+
+function AdminEmpty({ icon: Icon, text }: { icon: typeof Database; text: string }) {
+  return (
+    <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-line bg-slate-50 p-5 text-sm text-muted">
+      <Icon className="h-4 w-4 text-brand" /> {text}
+    </div>
   );
 }

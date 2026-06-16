@@ -9,13 +9,15 @@ export function ListingImage({
   alt,
   priority = false,
   sizes,
-  className = "object-cover"
+  className = "object-cover",
+  external = false
 }: {
   src?: string | null;
   alt: string;
   priority?: boolean;
   sizes: string;
   className?: string;
+  external?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
 
@@ -25,6 +27,21 @@ export function ListingImage({
         <Home className="h-9 w-9" strokeWidth={1.5} />
         <span className="mt-2 text-xs font-semibold">图片待补充</span>
       </div>
+    );
+  }
+
+  if (external) {
+    return (
+      // External candidate images can come from changing source domains.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={alt}
+        className={`h-full w-full ${className}`}
+        loading={priority ? "eager" : "lazy"}
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+      />
     );
   }
 

@@ -1,5 +1,6 @@
 "use server";
 
+import * as cheerio from "cheerio";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
@@ -53,6 +54,15 @@ function createListingError(error: string, step: number): CreateListingState {
     step,
     listing_id: null
   };
+}
+
+function logListingCreateError(stage: string, error: { code?: string; message?: string; details?: string; hint?: string }) {
+  console.error(`createListing failed at ${stage}`, {
+    code: error.code,
+    message: error.message,
+    details: error.details,
+    hint: error.hint
+  });
 }
 
 export async function createListing(
@@ -145,6 +155,10 @@ export async function createListing(
     .single();
 
   if (error || !listing) {
+    if (error) logListingCreateError("listing_insert", error);
+    if (error?.code === "42501") {
+      return createListingError("listing_permission", 2);
+    }
     return createListingError("create_failed", 0);
   }
 
@@ -157,7 +171,11 @@ export async function createListing(
 
   const { error: facilityInsertError } = await supabase.from("listing_facilities").insert(facilityRows);
   if (facilityInsertError) {
+    logListingCreateError("facility_insert", facilityInsertError);
     await supabase.from("listings").delete().eq("id", listing.id);
+    if (facilityInsertError.code === "42501") {
+      return createListingError("listing_permission", 1);
+    }
     return createListingError("create_failed", 1);
   }
 
@@ -322,7 +340,6 @@ export async function getHomeListings() {
 export async function searchListings(searchParams: Record<string, string | string[] | undefined>) {
   const supabase = await createClient();
   const adminSupabase = createAdminClient();
-  const profile = await getCurrentProfile();
   const keyword = String(searchParams.q ?? "").trim();
   const candidateNo = parseCandidateNo(keyword);
   const selectedFacilities = Array.isArray(searchParams.facility)
@@ -403,7 +420,7 @@ export async function searchListings(searchParams: Record<string, string | strin
 
   const [{ data, error }, candidateListings] = await Promise.all([
     query.limit(60),
-    selectedFacilities.length > 0 || profile?.role !== "admin"
+    selectedFacilities.length > 0
       ? Promise.resolve([] as ListingCard[])
       : searchCandidateListings(adminSupabase, searchParams, keyword, candidateNo, location, locationPostalCodes)
   ]);
@@ -459,11 +476,18 @@ export async function searchListings(searchParams: Record<string, string | strin
   }));
 
   if (sort === "price_asc") return hydrated.sort((a, b) => a.rent_amount - b.rent_amount).slice(0, 60);
-  if (sort === "available_soon") return hydrated.sort((a, b) => a.available_from.localeCompare(b.available_from)).slice(0, 60);
+  if (sort === "available_soon") return hydrated.sort(compareAvailableFrom).slice(0, 60);
   if (sort === "ntu_commute") return hydrated.sort(compareNtuCommute).slice(0, 60);
   return hydrated
     .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
     .slice(0, 60);
+}
+
+function compareAvailableFrom(left: ListingCard, right: ListingCard) {
+  if (!left.available_from && !right.available_from) return 0;
+  if (!left.available_from) return 1;
+  if (!right.available_from) return -1;
+  return left.available_from.localeCompare(right.available_from);
 }
 
 function compareNtuCommute(left: ListingCard, right: ListingCard) {
@@ -499,7 +523,7 @@ async function searchCandidateListings(
 ): Promise<ListingCard[]> {
   let query = supabase
     .from("listing_import_candidates")
-    .select("id,candidate_no,source,source_url,parsed_title,parsed_rent_amount,parsed_postal_code,parsed_area,parsed_mrt,parsed_room_type,parsed_available_from,parsed_available_note,parsed_min_lease_months,parsed_cooking_policy,parsed_registration_allowed,parsed_landlord_staying,parsed_bathroom_shared_with_count,parsed_current_occupants_count,parsed_description,parsed_description_clean,updated_at")
+    .select("id,candidate_no,ingestion_listing_id,source,source_url,parsed_title,parsed_rent_amount,parsed_postal_code,parsed_area,parsed_mrt,parsed_room_type,parsed_available_from,parsed_available_note,parsed_min_lease_months,parsed_cooking_policy,parsed_registration_allowed,parsed_landlord_staying,parsed_bathroom_shared_with_count,parsed_current_occupants_count,parsed_description,parsed_description_clean,updated_at")
     .in("import_status", ["parsed", "needs_review", "approved"])
     .is("listing_id", null)
     .not("parsed_title", "is", null)
@@ -546,7 +570,28 @@ async function searchCandidateListings(
   const { data, error } = await query.limit(limit);
   if (error) throw new Error(error.message);
 
+  const ingestionIds = (data ?? []).map((candidate) => candidate.ingestion_listing_id);
+  const { data: ingestionRows, error: ingestionError } = ingestionIds.length > 0
+    ? await supabase
+      .from("ingestion_listings")
+      .select("id,listing_url,detail_url,list_raw_html,raw_detail_html")
+      .in("id", ingestionIds)
+    : { data: [], error: null };
+  if (ingestionError) throw new Error(ingestionError.message);
+
+  const ingestionById = new Map((ingestionRows ?? []).map((row) => [String(row.id), row]));
+
   return (data ?? []).map((candidate) => ({
+    ...(() => {
+      const ingestion = ingestionById.get(String(candidate.ingestion_listing_id));
+      const pageUrl = candidate.source_url || ingestion?.detail_url || ingestion?.listing_url;
+      return {
+        listing_images: extractCandidateImages(
+          [ingestion?.raw_detail_html, ingestion?.list_raw_html],
+          pageUrl
+        )
+      };
+    })(),
     id: `candidate-${candidate.id}`,
     candidate_no: candidate.candidate_no,
     listing_no: null,
@@ -554,12 +599,12 @@ async function searchCandidateListings(
     rent_amount: candidate.parsed_rent_amount ?? 0,
     room_type: candidate.parsed_room_type,
     postal_code: candidate.parsed_postal_code,
-    available_from: candidate.parsed_available_from ?? new Date().toISOString().slice(0, 10),
+    available_from: candidate.parsed_available_from,
     available_note: candidate.parsed_available_note,
-    min_lease_months: candidate.parsed_min_lease_months ?? 6,
+    min_lease_months: candidate.parsed_min_lease_months,
     cooking_policy: candidate.parsed_cooking_policy as ListingCard["cooking_policy"],
-    registration_allowed: candidate.parsed_registration_allowed ?? false,
-    landlord_staying: candidate.parsed_landlord_staying ?? false,
+    registration_allowed: candidate.parsed_registration_allowed,
+    landlord_staying: candidate.parsed_landlord_staying,
     bathroom_shared_with_count: candidate.parsed_bathroom_shared_with_count,
     current_occupants_count: candidate.parsed_current_occupants_count,
     description: candidate.parsed_description,
@@ -568,12 +613,15 @@ async function searchCandidateListings(
     source_url: candidate.source_url,
     geocoding: null,
     ntu_commute: null,
-    listing_images: [],
     card_source: "candidate" as const
   }));
 }
 
 export async function getListingDetail(id: string) {
+  if (id.startsWith("candidate-")) {
+    return getCandidateListingDetail(id.slice("candidate-".length));
+  }
+
   const supabase = await createClient();
   const adminSupabase = createAdminClient();
   const { data, error } = await supabase
@@ -603,16 +651,175 @@ export async function getListingDetail(id: string) {
 
   return {
     ...data,
+    tenant_type_preference: Array.isArray(data.tenant_type_preference) ? data.tenant_type_preference : [],
     geocoding: geocoding.data ?? null,
     ntu_commute: commute.data ?? null,
     listing_images: images.data ?? [],
     listing_facilities: facilitiesRows.data ?? [],
-    nearby_places_cache: nearbyRows.data ?? []
+    nearby_places_cache: nearbyRows.data ?? [],
+    detail_source: "official"
   } as ListingDetail;
+}
+
+async function getCandidateListingDetail(candidateId: string): Promise<ListingDetail | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(candidateId)) {
+    return null;
+  }
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("listing_import_candidates")
+    .select("id,candidate_no,ingestion_listing_id,source,source_url,parsed_title,parsed_description,parsed_description_clean,parsed_rent_amount,parsed_deposit_amount,parsed_postal_code,parsed_listing_type,parsed_room_type,parsed_available_from,parsed_available_note,parsed_min_lease_months,parsed_max_occupants,parsed_registration_allowed,parsed_landlord_staying,parsed_total_bedrooms,parsed_total_bathrooms,parsed_current_occupants_count,parsed_bathroom_shared_with_count,parsed_gender_preference,parsed_wechat,parsed_phone,parsed_is_owner_direct,parsed_is_agent,parsed_is_sublet,parsed_utilities_policy,parsed_aircon_policy,parsed_cooking_policy,parsed_visitors_policy,parsed_smoking_policy,parsed_pets_policy,parsed_tenant_type_preference,updated_at")
+    .eq("id", candidateId)
+    .in("import_status", ["parsed", "needs_review", "approved"])
+    .is("listing_id", null)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const postalCode = data.parsed_postal_code;
+  const [geocoding, commute, ingestion] = await Promise.all([
+    postalCode
+      ? supabase
+        .from("geocoding_cache")
+        .select("block,road_name,building,property_type,latitude,longitude")
+        .eq("postal_code", postalCode)
+        .eq("status", "success")
+        .maybeSingle()
+      : Promise.resolve({ data: null }),
+    postalCode
+      ? supabase
+        .from("listing_commute_cache")
+        .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,ntu_straight_distance_km,status,skip_reason,computed_at")
+        .eq("postal_code", postalCode)
+        .maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("ingestion_listings")
+      .select("listing_url,detail_url,list_raw_html,raw_detail_html")
+      .eq("id", data.ingestion_listing_id)
+      .maybeSingle()
+  ]);
+  const pageUrl = data.source_url || ingestion.data?.detail_url || ingestion.data?.listing_url;
+  const candidateImages = extractCandidateImages(
+    [ingestion.data?.raw_detail_html, ingestion.data?.list_raw_html],
+    pageUrl
+  );
+
+  return {
+    id: `candidate-${data.id}`,
+    candidate_no: data.candidate_no,
+    listing_no: null,
+    title: data.parsed_title ?? "未命名网络房源",
+    rent_amount: data.parsed_rent_amount ?? 0,
+    room_type: data.parsed_room_type,
+    postal_code: postalCode,
+    available_from: data.parsed_available_from,
+    available_note: data.parsed_available_note,
+    min_lease_months: data.parsed_min_lease_months,
+    cooking_policy: data.parsed_cooking_policy as ListingDetail["cooking_policy"],
+    registration_allowed: data.parsed_registration_allowed,
+    landlord_staying: data.parsed_landlord_staying,
+    bathroom_shared_with_count: data.parsed_bathroom_shared_with_count,
+    current_occupants_count: data.parsed_current_occupants_count,
+    description: data.parsed_description,
+    description_clean: data.parsed_description_clean,
+    updated_at: data.updated_at,
+    geocoding: geocoding.data ?? null,
+    ntu_commute: commute.data ?? null,
+    listing_images: candidateImages,
+    card_source: "candidate",
+    source_url: data.source_url,
+    owner_id: null,
+    status: null,
+    listing_type: data.parsed_listing_type,
+    deposit_amount: data.parsed_deposit_amount,
+    max_occupants: data.parsed_max_occupants,
+    gender_preference: data.parsed_gender_preference,
+    source: data.source,
+    contact_visibility: null,
+    wechat: data.parsed_wechat,
+    phone: data.parsed_phone,
+    is_owner_direct: data.parsed_is_owner_direct,
+    is_agent: data.parsed_is_agent,
+    is_sublet: data.parsed_is_sublet,
+    verification_status: null,
+    utilities_policy: data.parsed_utilities_policy as ListingDetail["utilities_policy"],
+    aircon_policy: data.parsed_aircon_policy as ListingDetail["aircon_policy"],
+    visitors_policy: data.parsed_visitors_policy as ListingDetail["visitors_policy"],
+    smoking_policy: data.parsed_smoking_policy as ListingDetail["smoking_policy"],
+    pets_policy: data.parsed_pets_policy as ListingDetail["pets_policy"],
+    tenant_type_preference: Array.isArray(data.parsed_tenant_type_preference) ? data.parsed_tenant_type_preference : [],
+    total_bedrooms: data.parsed_total_bedrooms,
+    total_bathrooms: data.parsed_total_bathrooms,
+    listing_facilities: [],
+    nearby_places_cache: [],
+    detail_source: "candidate"
+  };
+}
+
+function extractCandidateImages(
+  htmlValues: Array<string | null | undefined>,
+  pageUrl: string | null | undefined
+) {
+  const urls = new Set<string>();
+
+  for (const html of htmlValues) {
+    if (!html) continue;
+    const $ = cheerio.load(html);
+
+    $("img").each((_, element) => {
+      const node = $(element);
+      const candidates = [
+        node.attr("data-src"),
+        node.attr("data-original"),
+        node.attr("data-lazy-src"),
+        node.attr("src"),
+        node.attr("srcset")?.split(",")[0]?.trim().split(/\s+/)[0]
+      ];
+
+      for (const value of candidates) {
+        const imageUrl = normalizeCandidateImageUrl(value, pageUrl);
+        if (imageUrl) urls.add(imageUrl);
+      }
+    });
+  }
+
+  return [...urls].slice(0, 6).map((image_url, sort_order) => ({
+    image_url,
+    sort_order,
+    caption: null
+  }));
+}
+
+function normalizeCandidateImageUrl(value: string | undefined, pageUrl: string | null | undefined) {
+  if (!value || value.startsWith("data:") || value.startsWith("blob:")) return null;
+
+  try {
+    const url = new URL(value, pageUrl || undefined);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    if (/(?:logo|avatar|icon|emoji|loading|placeholder|qrcode|qr-code|sprite)/i.test(url.pathname)) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 export async function findListingId(searchValue: string) {
   const value = searchValue.trim();
+  const candidateNo = parseCandidateNo(value);
+  if (candidateNo) {
+    const adminSupabase = createAdminClient();
+    const { data } = await adminSupabase
+      .from("listing_import_candidates")
+      .select("id")
+      .eq("candidate_no", candidateNo)
+      .in("import_status", ["parsed", "needs_review", "approved"])
+      .is("listing_id", null)
+      .maybeSingle();
+    return data?.id ? `candidate-${data.id}` : null;
+  }
+
   if (!/^[0-9]{5}$/.test(value) && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
     return null;
   }

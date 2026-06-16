@@ -89,7 +89,7 @@ export default async function IngestionListingDetailPage({ params }: PageProps) 
           <h2 className="font-semibold text-ink">采集字段</h2>
           <dl className="mt-3 space-y-3 text-sm">
             <Field label="列表联系" value={listing.list_contact} />
-            <Field label="置顶" value={listing.is_top ? "是" : "否"} />
+            <Field label="置顶" value={listing.is_top == null ? "待补充" : listing.is_top ? "是" : "否"} />
             <Field label="抓取时间" value={formatSingaporeMediumDateTime(listing.scraped_at)} />
             <Field label="入库时间" value={formatSingaporeMediumDateTime(listing.created_at)} />
           </dl>

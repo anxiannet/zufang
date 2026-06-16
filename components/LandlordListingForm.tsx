@@ -22,6 +22,7 @@ const errorMessages: Record<string, string> = {
   missing_rent_amount: "请填写租金。",
   missing_available_from: "请填写可入住日期。",
   missing_room_type: "房间或床位房源需要选择房间类型。",
+  listing_permission: "平台暂时无法写入房源数据，请稍后重试；这不是你填写内容的问题。",
   create_failed: "创建房源失败，请检查表单内容后再提交。你填写的内容已保留。",
   image_count: "最多只能上传 6 张图片。",
   image_type: "图片仅支持 JPG、PNG 和 WebP 格式。",
@@ -44,6 +45,7 @@ export function LandlordListingForm({
   const [descriptionClean, setDescriptionClean] = useState("");
   const [cleanEdited, setCleanEdited] = useState(false);
   const [stepError, setStepError] = useState<string | null>(null);
+  const [hideSubmitError, setHideSubmitError] = useState(false);
   const isAdmin = role === "admin";
   const canSetModerationFields = isAdmin && adminMode;
 
@@ -80,6 +82,7 @@ export function LandlordListingForm({
   }
 
   function goToStep(nextStep: number, form: HTMLFormElement) {
+    setHideSubmitError(true);
     if (step === 0 && nextStep > 0 && !validateStepOne(form)) return;
     setStepError(null);
     setStep(nextStep);
@@ -98,21 +101,23 @@ export function LandlordListingForm({
 
   return (
     <form
-      className="card space-y-6 p-4 md:p-6"
+      className="card space-y-6 p-5 sm:p-7"
       onSubmit={(event) => {
         event.preventDefault();
+        if (step !== steps.length - 1) return;
+        setHideSubmitError(false);
         const formData = new FormData(event.currentTarget);
         startTransition(() => submitAction(formData));
       }}
     >
       {canSetModerationFields ? <input type="hidden" name="admin_mode" value="true" /> : null}
       {stepError ? (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {stepError}
         </div>
       ) : null}
-      {submitState.status === "error" && submitState.error ? (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+      {!hideSubmitError && submitState.status === "error" && submitState.error ? (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {errorMessages[submitState.error] ?? "提交失败，请稍后重试。你填写的内容已保留。"}
         </div>
       ) : null}
@@ -121,7 +126,11 @@ export function LandlordListingForm({
           <button
             key={label}
             type="button"
-            onClick={(event) => goToStep(index, event.currentTarget.form!)}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              goToStep(index, event.currentTarget.form!);
+            }}
             className={`rounded-full px-3 py-1 text-sm font-semibold ${step === index ? "bg-brand text-white" : "bg-gray-100 text-muted"}`}
           >
             {index + 1}. {label}
@@ -193,11 +202,11 @@ export function LandlordListingForm({
             ))}
           </div>
         </div>
-        <details className="rounded-lg border border-line bg-gray-50 p-4">
+        <details className="rounded-2xl border border-line bg-slate-50 p-4">
           <summary className="cursor-pointer font-semibold text-ink">补充设施，可选</summary>
           <div className="mt-4 space-y-3">
             {facilities.map((facility) => (
-              <div key={facility} className="grid gap-2 rounded-md border border-line p-3 md:grid-cols-[160px_180px_1fr]">
+              <div key={facility} className="grid gap-2 rounded-xl border border-line bg-white p-3 md:grid-cols-[160px_180px_1fr]">
                 <div className="font-medium">{facilityLabels[facility]}</div>
                 <select name={`facility_${facility}`} defaultValue="not_available">
                   <option value="available">可使用</option>
@@ -237,7 +246,7 @@ export function LandlordListingForm({
           )}
           <p className="text-sm text-muted">最多上传 6 张图片，每张不超过 5MB，支持 JPG、PNG 和 WebP。</p>
           {imageRows.map((row, index) => (
-            <div key={row} className="grid gap-2 rounded-md border border-line p-3 md:grid-cols-[1fr_1fr_auto]">
+            <div key={row} className="grid gap-2 rounded-xl border border-line bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
               <input
                 name="image_file"
                 type="file"
@@ -268,9 +277,31 @@ export function LandlordListingForm({
       </section>
 
       <div className="flex justify-between border-t border-line pt-4">
-        <button type="button" className="btn-secondary" onClick={() => { setStepError(null); setStep((value) => Math.max(0, value - 1)); }}>上一步</button>
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            setHideSubmitError(true);
+            setStepError(null);
+            setStep((value) => Math.max(0, value - 1));
+          }}
+        >
+          上一步
+        </button>
         {step < steps.length - 1 ? (
-          <button type="button" className="btn-primary" onClick={(event) => goToStep(Math.min(steps.length - 1, step + 1), event.currentTarget.form!)}>下一步</button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              goToStep(Math.min(steps.length - 1, step + 1), event.currentTarget.form!);
+            }}
+          >
+            下一步
+          </button>
         ) : (
           <button type="submit" className="btn-primary disabled:cursor-not-allowed disabled:opacity-60" disabled={isPending}>
             {isPending ? "提交中..." : "提交房源"}

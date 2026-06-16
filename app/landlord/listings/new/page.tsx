@@ -1,6 +1,8 @@
 import { LandlordListingForm } from "@/components/LandlordListingForm";
 import { getCurrentProfile } from "@/lib/auth";
 import Link from "next/link";
+import { FileCheck2, ShieldCheck } from "lucide-react";
+import { PageHeader } from "@/components/ui/PageHeader";
 
 export default async function NewListingPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const profile = await getCurrentProfile();
@@ -21,16 +23,17 @@ export default async function NewListingPage({ searchParams }: { searchParams: P
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 px-4 py-6">
-      <div>
-        <h1 className="text-2xl font-bold text-ink">发布房源</h1>
-        <p className="mt-2 text-sm text-muted">
-          先填写核心信息，平台会帮你整理成更适合租客看的房源页。联系方式默认不公开，通过整理后再按你的选择展示。
-        </p>
-      </div>
+    <div className="container-page max-w-5xl space-y-5 py-8 sm:py-10">
+      <PageHeader
+        eyebrow="Landlord Submission"
+        title="发布房源"
+        description="先填写核心信息，平台会帮你整理成更适合租客阅读的结构化房源页。"
+        actions={<div className="flex items-center gap-2 text-xs font-semibold text-muted"><ShieldCheck className="h-4 w-4 text-brand" /> 联系方式默认受保护</div>}
+      />
       {!profile ? (
-        <div className="card p-6 text-center">
-          <h2 className="text-xl font-bold text-ink">需要登录</h2>
+        <div className="card p-8 text-center">
+          <FileCheck2 className="mx-auto h-8 w-8 text-brand" />
+          <h2 className="mt-4 text-xl font-bold text-ink">登录后发布房源</h2>
           <p className="mt-2 text-sm text-muted">发布房源需要房东、中介或管理员账号。</p>
           <Link href="/auth/login?next=/landlord/listings/new&reason=listing" className="btn-primary mt-4">登录后发布</Link>
         </div>
@@ -43,17 +46,17 @@ export default async function NewListingPage({ searchParams }: { searchParams: P
       ) : (
         <>
           {missing ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               请先填写必填项：{missingLabels[missing] ?? missing}
             </div>
           ) : null}
           {typeof params.error === "string" && errorMessages[params.error] ? (
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {errorMessages[params.error]}
             </div>
           ) : null}
           {params.error === "listing_role" ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">当前账号角色不能发布房源。</div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">当前账号角色不能发布房源。</div>
           ) : null}
           <LandlordListingForm role={profile.role} />
         </>

@@ -3,6 +3,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getMyListings } from "@/actions/listings";
 import { getCurrentProfile } from "@/lib/auth";
+import { CalendarDays, MapPin, Plus, SearchX } from "lucide-react";
+import { Badge } from "@/components/ui/Badge";
+import { PageHeader } from "@/components/ui/PageHeader";
 
 export const metadata: Metadata = {
   title: "我的房源"
@@ -30,42 +33,49 @@ export default async function LandlordListingsPage() {
   const listings = await getMyListings();
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 px-4 py-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-ink">我的房源</h1>
-          <p className="mt-2 text-sm text-muted">查看你提交的房源和当前处理状态。</p>
-        </div>
-        <Link href="/landlord/listings/new" className="btn-primary">发布新房源</Link>
-      </div>
+    <div className="container-page max-w-6xl space-y-5 py-8 sm:py-10">
+      <PageHeader
+        eyebrow="Landlord Workspace"
+        title="我的房源"
+        description="查看已提交房源、平台整理进度和当前发布状态。"
+        actions={<Link href="/landlord/listings/new" className="btn-primary"><Plus className="h-4 w-4" /> 发布新房源</Link>}
+      />
 
       {listings.length > 0 ? (
         <div className="grid gap-3">
           {listings.map((listing) => (
-            <article key={listing.id} className="card flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <article key={listing.id} className="card flex flex-col gap-4 p-5 transition hover:border-teal-100 hover:shadow-lift sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="font-bold text-ink">{listing.title}</h2>
-                  <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-semibold text-brand">
-                    {statusLabels[listing.status] ?? listing.status}
-                  </span>
+                  <Badge tone={listing.status === "published" ? "success" : listing.status === "rejected" ? "warning" : "brand"}>{statusLabels[listing.status] ?? listing.status}</Badge>
                 </div>
-                <p className="mt-2 text-sm text-muted">
-                  {listing.listing_no ? `房源编号 ${listing.listing_no} · ` : ""}
-                  邮编 {listing.postal_code} · ${listing.rent_amount}/月 · {listing.available_from} 可入住
-                </p>
+                <div className="mt-3 flex flex-wrap gap-4 text-sm text-muted">
+                  <span className="font-bold text-ink">${listing.rent_amount.toLocaleString("en-SG")} / 月</span>
+                  <span className="flex items-center gap-1"><MapPin className="h-4 w-4" /> {listing.postal_code || "邮编待补充"}</span>
+                  <span className="flex items-center gap-1"><CalendarDays className="h-4 w-4" /> {formatDate(listing.available_from)}</span>
+                </div>
               </div>
               <Link href={`/rent/${listing.id}`} className="btn-secondary shrink-0">查看房源详情</Link>
             </article>
           ))}
         </div>
       ) : (
-        <section className="card p-8 text-center">
-          <h2 className="text-lg font-bold text-ink">还没有发布房源</h2>
+        <section className="card p-10 text-center">
+          <SearchX className="mx-auto h-9 w-9 text-brand" />
+          <h2 className="mt-4 text-lg font-bold text-ink">还没有发布房源</h2>
           <p className="mt-2 text-sm text-muted">填写核心信息后，平台会帮你整理展示内容。</p>
           <Link href="/landlord/listings/new" className="btn-primary mt-5">发布第一套房源</Link>
         </section>
       )}
     </div>
   );
+}
+
+function formatDate(value: string | null) {
+  if (!value) return "入住日期待补充";
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime())
+    ? "入住日期待补充"
+    : `${new Intl.DateTimeFormat("zh-SG", { year: "numeric", month: "short", day: "numeric" }).format(date)} 可入住`;
 }

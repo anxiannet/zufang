@@ -14,6 +14,7 @@ const roomLabels: Record<string, string> = {
 
 export function ListingDetailHero({ listing }: { listing: ListingDetail }) {
   const images = [...(listing.listing_images ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+  const isCandidate = listing.detail_source === "candidate";
   const address = [
     listing.geocoding?.building,
     listing.geocoding?.block ? `Blk ${listing.geocoding.block}` : null,
@@ -24,19 +25,25 @@ export function ListingDetailHero({ listing }: { listing: ListingDetail }) {
   return (
     <section>
       <div className="grid gap-3 lg:grid-cols-[2fr_1fr]">
-        <ImageFrame image={images[0]} title={listing.title} priority className="aspect-[16/10] lg:aspect-[16/9]" />
+        <ImageFrame image={images[0]} title={listing.title} external={isCandidate} priority className="aspect-[16/10] lg:aspect-[16/9]" />
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
-          <ImageFrame image={images[1]} title={listing.title} className="aspect-square lg:aspect-auto" />
-          <ImageFrame image={images[2]} title={listing.title} className="aspect-square lg:aspect-auto" />
+          <ImageFrame image={images[1]} title={listing.title} external={isCandidate} className="aspect-square lg:aspect-auto" />
+          <ImageFrame image={images[2]} title={listing.title} external={isCandidate} className="aspect-square lg:aspect-auto" />
         </div>
       </div>
 
       <div className="card relative mx-2 -mt-5 grid gap-6 p-5 sm:mx-5 sm:p-7 lg:grid-cols-[1fr_auto] lg:items-end">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="success">平台房源</Badge>
-            {listing.is_owner_direct ? <Badge tone="brand">屋主直租</Badge> : null}
-            <Badge>房源 #{listing.listing_no ? String(listing.listing_no).padStart(5, "0") : "待编号"}</Badge>
+            <Badge tone={listing.detail_source === "candidate" ? "warning" : "success"}>
+              {listing.detail_source === "candidate" ? "网络信息待核验" : "平台房源"}
+            </Badge>
+            {listing.is_owner_direct === true ? <Badge tone="brand">屋主直租</Badge> : null}
+            <Badge>
+              {listing.detail_source === "candidate"
+                ? `候选 #${listing.candidate_no ? `C${String(listing.candidate_no).padStart(4, "0")}` : "待编号"}`
+                : `房源 #${listing.listing_no ? String(listing.listing_no).padStart(5, "0") : "待编号"}`}
+            </Badge>
           </div>
           <h1 className="mt-4 text-2xl font-bold tracking-tight text-ink sm:text-3xl">{listing.title}</h1>
           <div className="mt-3 flex items-start gap-2 text-sm text-muted">
@@ -47,7 +54,7 @@ export function ListingDetailHero({ listing }: { listing: ListingDetail }) {
             <SummaryItem icon={CalendarDays} label="可入住" value={listing.available_note || formatDate(listing.available_from)} />
             <SummaryItem icon={Users} label="当前共住" value={countLabel(listing.current_occupants_count)} />
             <SummaryItem icon={Bath} label="共用浴室" value={countLabel(listing.bathroom_shared_with_count)} />
-            <SummaryItem icon={Users} label="最多入住" value={`${listing.max_occupants} 人`} />
+            <SummaryItem icon={Users} label="最多入住" value={countLabel(listing.max_occupants)} />
           </div>
         </div>
         <div className="rounded-2xl bg-slate-950 px-5 py-4 text-white lg:min-w-56">
@@ -63,11 +70,13 @@ export function ListingDetailHero({ listing }: { listing: ListingDetail }) {
 function ImageFrame({
   image,
   title,
+  external = false,
   priority = false,
   className
 }: {
   image?: { image_url: string; caption: string | null };
   title: string;
+  external?: boolean;
   priority?: boolean;
   className?: string;
 }) {
@@ -78,6 +87,7 @@ function ImageFrame({
         alt={image?.caption || title}
         priority={priority}
         sizes="(max-width: 1024px) 100vw, 66vw"
+        external={external}
       />
     </div>
   );
@@ -96,7 +106,8 @@ function countLabel(value: number | null) {
   return value == null ? "待补充" : `${value} 人`;
 }
 
-function formatDate(value: string) {
+function formatDate(value: string | null) {
+  if (!value) return "待补充";
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return "待补充";
   return new Intl.DateTimeFormat("zh-SG", { year: "numeric", month: "short", day: "numeric" }).format(date);

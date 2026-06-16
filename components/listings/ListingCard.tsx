@@ -24,7 +24,7 @@ const roomLabels: Record<string, string> = {
 export function ListingCard({ listing }: { listing: ListingCardType }) {
   const image = [...(listing.listing_images ?? [])].sort((a, b) => a.sort_order - b.sort_order)[0]?.image_url;
   const isCandidate = listing.card_source === "candidate";
-  const href = isCandidate && listing.source_url ? listing.source_url : `/rent/${listing.id}`;
+  const href = `/rent/${listing.id}`;
   const visibleNo = isCandidate
     ? listing.candidate_no ? `C${String(listing.candidate_no).padStart(4, "0")}` : "待核验"
     : listing.listing_no ? String(listing.listing_no).padStart(5, "0") : "待编号";
@@ -40,6 +40,7 @@ export function ListingCard({ listing }: { listing: ListingCardType }) {
           alt={listing.title}
           className="object-cover transition duration-500 group-hover:scale-[1.03]"
           sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+          external={isCandidate}
         />
         <div className="absolute inset-x-0 top-0 flex items-start justify-between p-3">
           <Badge tone={isCandidate ? "warning" : "success"}>
@@ -90,16 +91,13 @@ export function ListingCard({ listing }: { listing: ListingCardType }) {
               <div className="text-sm font-bold text-ink">{commute}</div>
             </div>
           </div>
-          <span className="text-xs font-semibold text-brand">{isCandidate ? "查看来源" : "查看详情"}</span>
+          <span className="text-xs font-semibold text-brand">查看详情</span>
         </div>
       </div>
     </>
   );
 
   const className = "group card flex h-full flex-col overflow-hidden transition duration-300 hover:-translate-y-1 hover:border-teal-100 hover:shadow-lift";
-  if (isCandidate && listing.source_url) {
-    return <a href={href} target="_blank" rel="noreferrer" className={className}>{content}</a>;
-  }
   return <Link href={href} className={className}>{content}</Link>;
 }
 
@@ -128,8 +126,8 @@ function getBadges(listing: ListingCardType) {
   if (listing.registration_allowed) values.push({ label: "可报地址", tone: "success" });
   if (listing.cooking_policy === "full") values.push({ label: "可煮", tone: "success" });
   if (listing.cooking_policy === "light") values.push({ label: "可小煮", tone: "neutral" });
-  if (!listing.landlord_staying) values.push({ label: "无屋主同住", tone: "neutral" });
-  if (new Date(listing.available_from).getTime() <= Date.now()) values.push({ label: "可尽快入住", tone: "brand" });
+  if (listing.landlord_staying === false) values.push({ label: "无屋主同住", tone: "neutral" });
+  if (listing.available_from && new Date(`${listing.available_from}T00:00:00`).getTime() <= Date.now()) values.push({ label: "可尽快入住", tone: "brand" });
   return values.slice(0, 4);
 }
 
@@ -156,7 +154,8 @@ function countLabel(value: number | null) {
   return value == null ? "待补充" : `${value} 人`;
 }
 
-function formatDate(value: string) {
+function formatDate(value: string | null) {
+  if (!value) return "待补充";
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return "待补充";
   return new Intl.DateTimeFormat("zh-SG", { month: "short", day: "numeric" }).format(date);
