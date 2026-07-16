@@ -14,6 +14,7 @@
     "check:candidates": "tsx scripts/checkAllCandidateListings.ts",
     "import:crawler-listings": "tsx scripts/importCrawlerListings.ts",
     "enrich:ntu-commute": "tsx scripts/enrichNtuCommute.ts",
+    "enrich:nearby-places": "tsx scripts/enrich-nearby-places.ts",
     "test:ntu-commute": "tsx src/tests/ntuCommute.test.ts",
     "test:ingestion": "tsx src/tests/zufangDetailParser.test.ts && tsx src/tests/listingExclusion.test.ts && tsx src/tests/staleListingMaintenance.test.ts && tsx src/tests/semanticRentalParser.test.ts && tsx src/tests/listingImportParser.test.ts && tsx src/tests/listingRepository.test.ts"
   },

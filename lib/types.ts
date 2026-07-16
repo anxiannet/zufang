@@ -1,6 +1,7 @@
 export const facilities = [
   "wifi",
   "aircon",
+  "tv",
   "washing_machine",
   "dryer",
   "fridge",
@@ -18,6 +19,7 @@ export const facilities = [
 export const facilityLabels: Record<(typeof facilities)[number], string> = {
   wifi: "WiFi",
   aircon: "空调",
+  tv: "电视",
   washing_machine: "洗衣机",
   dryer: "烘干机",
   fridge: "冰箱",
@@ -62,6 +64,8 @@ export type NtuCommuteCache = {
   status: "pending" | "processing" | "success" | "failed" | "skipped_far";
   skip_reason: string | null;
   computed_at: string | null;
+  is_estimated?: boolean;
+  estimate_basis?: string | null;
 };
 
 export type ListingCard = {
@@ -72,6 +76,7 @@ export type ListingCard = {
   rent_amount: number;
   room_type: string | null;
   postal_code: string | null;
+  mrt?: string | null;
   available_from: string | null;
   available_note: string | null;
   min_lease_months: number | null;
@@ -83,6 +88,7 @@ export type ListingCard = {
   description: string | null;
   description_clean: string | null;
   updated_at: string;
+  source_posted_at?: string | null;
   geocoding: ListingGeocoding | null;
   ntu_commute: NtuCommuteCache | null;
   listing_images?: { image_url: string; sort_order: number; caption: string | null }[];
@@ -114,6 +120,6 @@ export type ListingDetail = ListingCard & {
   total_bedrooms: number | null;
   total_bathrooms: number | null;
   listing_facilities?: { facility_name: string; availability: FacilityAvailability; note: string | null }[];
-  nearby_places_cache?: { place_type: string; name: string; distance_meters: number; walking_minutes: number }[];
+  nearby_places_cache?: { place_type: string; name: string; distance_meters: number; walking_minutes: number; display_note?: string }[];
   detail_source?: "official" | "candidate";
 };

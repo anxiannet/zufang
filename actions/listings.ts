@@ -6,6 +6,14 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { parseListingAvailability } from "@/lib/listingDates";
+import { cleanPublicListingDescription } from "@/lib/listingDescription";
+import { extractListingFacilities, removeExtractedFacilityText } from "@/lib/listingFacilities";
+import { parse_source_posted_at } from "@/lib/listingSourceDates";
+import { extractListingStructuredFacts } from "@/lib/listingStructuredFacts";
+import { get_listing_visibility_cutoff, is_listing_date_visible } from "@/lib/listingVisibility";
+import { build_mrt_commute_estimate } from "@/lib/mrtCommuteEstimates";
+import { build_ntu_commute_fallback } from "@/lib/ntuDistance";
 import { facilities, type FacilityAvailability, type ListingCard, type ListingDetail } from "@/lib/types";
 
 function parseCandidateNo(value: string): number | null {
@@ -270,11 +278,13 @@ export async function submitListingForReview(listingId: string) {
 export async function getHomeListings() {
   const supabase = await createClient();
   const adminSupabase = createAdminClient();
+  const visibility_cutoff = get_listing_visibility_cutoff();
   const [{ data, error }, candidateListings] = await Promise.all([
     supabase
       .from("listings")
       .select("id,listing_no,title,rent_amount,room_type,postal_code,available_from,available_note,min_lease_months,cooking_policy,registration_allowed,landlord_staying,bathroom_shared_with_count,current_occupants_count,description,description_clean,updated_at")
       .eq("status", "published")
+      .gte("updated_at", visibility_cutoff)
       .order("updated_at", { ascending: false })
       .limit(6),
     searchCandidateListings(adminSupabase, {}, "", null, "", [], 6)
@@ -324,12 +334,16 @@ export async function getHomeListings() {
   }
   const geocodingByPostalCode = new Map((geocodingResult.data ?? []).map((row) => [row.postal_code, row]));
   const commuteByPostalCode = new Map((commuteResult.data ?? []).map((row) => [row.postal_code, row]));
-  const hydrate = (listing: ListingCard): ListingCard => ({
-    ...listing,
-    geocoding: listing.postal_code ? geocodingByPostalCode.get(listing.postal_code) ?? null : null,
-    ntu_commute: listing.postal_code ? commuteByPostalCode.get(listing.postal_code) ?? null : null,
-    listing_images: listing.card_source === "official" ? imagesByListing.get(listing.id) ?? [] : []
-  });
+  const hydrate = (listing: ListingCard): ListingCard => {
+    const geocoding = listing.postal_code ? geocodingByPostalCode.get(listing.postal_code) ?? null : null;
+    const commute = listing.postal_code ? commuteByPostalCode.get(listing.postal_code) ?? null : null;
+    return {
+      ...listing,
+      geocoding,
+      ntu_commute: build_listing_commute(listing.postal_code, listing.mrt, geocoding, commute),
+      listing_images: listing.card_source === "official" ? imagesByListing.get(listing.id) ?? [] : listing.listing_images ?? []
+    };
+  };
 
   return {
     officialListings: officialListings.map(hydrate),
@@ -340,6 +354,7 @@ export async function getHomeListings() {
 export async function searchListings(searchParams: Record<string, string | string[] | undefined>) {
   const supabase = await createClient();
   const adminSupabase = createAdminClient();
+  const visibility_cutoff = get_listing_visibility_cutoff();
   const keyword = String(searchParams.q ?? "").trim();
   const candidateNo = parseCandidateNo(keyword);
   const selectedFacilities = Array.isArray(searchParams.facility)
@@ -363,7 +378,8 @@ export async function searchListings(searchParams: Record<string, string | strin
   let query = supabase
     .from("listings")
     .select("id,listing_no,title,rent_amount,room_type,postal_code,available_from,available_note,min_lease_months,cooking_policy,registration_allowed,landlord_staying,bathroom_shared_with_count,current_occupants_count,description,description_clean,updated_at")
-    .eq("status", "published");
+    .eq("status", "published")
+    .gte("updated_at", visibility_cutoff);
 
   if (candidateNo) {
     query = query.eq("id", "00000000-0000-0000-0000-000000000000");
@@ -468,18 +484,22 @@ export async function searchListings(searchParams: Record<string, string | strin
   const geocodingByPostalCode = new Map((geocodingResult.data ?? []).map((row) => [row.postal_code, row]));
   const commuteByPostalCode = new Map((commuteResult.data ?? []).map((row) => [row.postal_code, row]));
 
-  const hydrated = listings.map((listing) => ({
-    ...listing,
-    geocoding: listing.postal_code ? geocodingByPostalCode.get(listing.postal_code) ?? null : null,
-    ntu_commute: listing.postal_code ? commuteByPostalCode.get(listing.postal_code) ?? null : null,
-    listing_images: listing.card_source === "official" ? imagesByListing.get(listing.id) ?? [] : []
-  }));
+  const hydrated = listings.map((listing) => {
+    const geocoding = listing.postal_code ? geocodingByPostalCode.get(listing.postal_code) ?? null : null;
+    const commute = listing.postal_code ? commuteByPostalCode.get(listing.postal_code) ?? null : null;
+    return {
+      ...listing,
+      geocoding,
+      ntu_commute: build_listing_commute(listing.postal_code, listing.mrt, geocoding, commute),
+      listing_images: listing.card_source === "official" ? imagesByListing.get(listing.id) ?? [] : listing.listing_images ?? []
+    };
+  });
 
   if (sort === "price_asc") return hydrated.sort((a, b) => a.rent_amount - b.rent_amount).slice(0, 60);
   if (sort === "available_soon") return hydrated.sort(compareAvailableFrom).slice(0, 60);
   if (sort === "ntu_commute") return hydrated.sort(compareNtuCommute).slice(0, 60);
   return hydrated
-    .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+    .sort((a, b) => listing_display_timestamp(b) - listing_display_timestamp(a))
     .slice(0, 60);
 }
 
@@ -567,25 +587,30 @@ async function searchCandidateListings(
   else if (sort === "available_soon") query = query.order("parsed_available_from", { ascending: true });
   else query = query.order("updated_at", { ascending: false });
 
-  const { data, error } = await query.limit(limit);
+  const { data, error } = await query.limit(500);
   if (error) throw new Error(error.message);
 
   const ingestionIds = (data ?? []).map((candidate) => candidate.ingestion_listing_id);
   const { data: ingestionRows, error: ingestionError } = ingestionIds.length > 0
     ? await supabase
       .from("ingestion_listings")
-      .select("id,listing_url,detail_url,list_raw_html,raw_detail_html")
+      .select("id,listing_url,detail_url,list_raw_html,list_raw_text,raw_detail_html,scraped_at")
       .in("id", ingestionIds)
     : { data: [], error: null };
   if (ingestionError) throw new Error(ingestionError.message);
 
   const ingestionById = new Map((ingestionRows ?? []).map((row) => [String(row.id), row]));
 
-  return (data ?? []).map((candidate) => ({
+  const visible_candidates = (data ?? []).map((candidate) => ({
     ...(() => {
       const ingestion = ingestionById.get(String(candidate.ingestion_listing_id));
       const pageUrl = candidate.source_url || ingestion?.detail_url || ingestion?.listing_url;
       return {
+        source_posted_at: parse_candidate_source_posted_at(
+          ingestion?.list_raw_text,
+          ingestion?.raw_detail_html,
+          ingestion?.scraped_at
+        ),
         listing_images: extractCandidateImages(
           [ingestion?.raw_detail_html, ingestion?.list_raw_html],
           pageUrl
@@ -599,22 +624,64 @@ async function searchCandidateListings(
     rent_amount: candidate.parsed_rent_amount ?? 0,
     room_type: candidate.parsed_room_type,
     postal_code: candidate.parsed_postal_code,
-    available_from: candidate.parsed_available_from,
-    available_note: candidate.parsed_available_note,
+    mrt: candidate.parsed_mrt,
+    available_from: candidate.parsed_available_from ?? parseListingAvailability(candidate.parsed_description_clean ?? candidate.parsed_description).date,
+    available_note: candidate.parsed_available_note ?? parseListingAvailability(candidate.parsed_description_clean ?? candidate.parsed_description).note,
     min_lease_months: candidate.parsed_min_lease_months,
     cooking_policy: candidate.parsed_cooking_policy as ListingCard["cooking_policy"],
     registration_allowed: candidate.parsed_registration_allowed,
     landlord_staying: candidate.parsed_landlord_staying,
     bathroom_shared_with_count: candidate.parsed_bathroom_shared_with_count,
     current_occupants_count: candidate.parsed_current_occupants_count,
-    description: candidate.parsed_description,
-    description_clean: candidate.parsed_description_clean,
+    description: null,
+    description_clean: cleanPublicListingDescription(candidate.parsed_description_clean ?? candidate.parsed_description, candidate.parsed_title),
     updated_at: candidate.updated_at,
     source_url: candidate.source_url,
     geocoding: null,
     ntu_commute: null,
     card_source: "candidate" as const
-  }));
+  })).filter((listing) =>
+    Boolean(listing.postal_code || listing.mrt) &&
+    is_listing_date_visible(listing.source_posted_at ?? listing.updated_at)
+  );
+
+  if (sort === "price_asc") visible_candidates.sort((a, b) => a.rent_amount - b.rent_amount);
+  else if (sort === "available_soon") visible_candidates.sort(compareAvailableFrom);
+  else visible_candidates.sort((a, b) => listing_display_timestamp(b) - listing_display_timestamp(a));
+  return visible_candidates.slice(0, limit);
+}
+
+function listing_display_timestamp(listing: ListingCard): number {
+  return Date.parse(listing.source_posted_at ?? listing.updated_at);
+}
+
+function build_listing_commute(
+  postal_code: string | null,
+  mrt: string | null | undefined,
+  geocoding: ListingCard["geocoding"],
+  commute: ListingCard["ntu_commute"]
+) {
+  const postal_commute = build_ntu_commute_fallback(postal_code, geocoding, commute);
+  const mrt_estimate = build_mrt_commute_estimate(mrt);
+  if (postal_commute && mrt_estimate && postal_commute.ntu_bus_minutes == null) {
+    return {
+      ...postal_commute,
+      ntu_bus_minutes: mrt_estimate.ntu_bus_minutes,
+      ntu_drive_minutes: postal_commute.ntu_drive_minutes ?? mrt_estimate.ntu_drive_minutes,
+      is_estimated: true,
+      estimate_basis: mrt_estimate.estimate_basis
+    };
+  }
+  return postal_commute ?? mrt_estimate;
+}
+
+function parse_candidate_source_posted_at(
+  list_text: string | null | undefined,
+  detail_html: string | null | undefined,
+  observed_at: string | null | undefined
+): string | null {
+  const detail_text = detail_html ? cheerio.load(detail_html).root().text() : null;
+  return parse_source_posted_at([detail_text, list_text].filter(Boolean).join(" "), observed_at);
 }
 
 export async function getListingDetail(id: string) {
@@ -635,7 +702,9 @@ export async function getListingDetail(id: string) {
   const [images, facilitiesRows, nearbyRows, geocoding, commute] = await Promise.all([
     supabase.from("listing_images").select("image_url,sort_order,caption").eq("listing_id", id).order("sort_order", { ascending: true }),
     supabase.from("listing_facilities").select("facility_name,availability,note").eq("listing_id", id),
-    supabase.from("nearby_places_cache").select("place_type,name,distance_meters,walking_minutes").eq("listing_id", id),
+    data.postal_code
+      ? supabase.from("nearby_places_cache").select("place_type,name,distance_meters,walking_minutes").eq("postal_code", data.postal_code)
+      : Promise.resolve({ data: [] }),
     supabase
       .from("geocoding_cache")
       .select("block,road_name,building,property_type,latitude,longitude")
@@ -653,7 +722,7 @@ export async function getListingDetail(id: string) {
     ...data,
     tenant_type_preference: Array.isArray(data.tenant_type_preference) ? data.tenant_type_preference : [],
     geocoding: geocoding.data ?? null,
-    ntu_commute: commute.data ?? null,
+    ntu_commute: build_ntu_commute_fallback(data.postal_code, geocoding.data ?? null, commute.data ?? null),
     listing_images: images.data ?? [],
     listing_facilities: facilitiesRows.data ?? [],
     nearby_places_cache: nearbyRows.data ?? [],
@@ -667,18 +736,35 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
   }
 
   const supabase = createAdminClient();
-  const { data, error } = await supabase
+  const primaryResult = await supabase
     .from("listing_import_candidates")
-    .select("id,candidate_no,ingestion_listing_id,source,source_url,parsed_title,parsed_description,parsed_description_clean,parsed_rent_amount,parsed_deposit_amount,parsed_postal_code,parsed_listing_type,parsed_room_type,parsed_available_from,parsed_available_note,parsed_min_lease_months,parsed_max_occupants,parsed_registration_allowed,parsed_landlord_staying,parsed_total_bedrooms,parsed_total_bathrooms,parsed_current_occupants_count,parsed_bathroom_shared_with_count,parsed_gender_preference,parsed_wechat,parsed_phone,parsed_is_owner_direct,parsed_is_agent,parsed_is_sublet,parsed_utilities_policy,parsed_aircon_policy,parsed_cooking_policy,parsed_visitors_policy,parsed_smoking_policy,parsed_pets_policy,parsed_tenant_type_preference,updated_at")
+    .select("id,candidate_no,ingestion_listing_id,source,source_url,parsed_title,parsed_description,parsed_description_clean,parsed_rent_amount,parsed_deposit_amount,parsed_postal_code,parsed_mrt,parsed_listing_type,parsed_room_type,parsed_available_from,parsed_available_note,parsed_min_lease_months,parsed_max_occupants,parsed_registration_allowed,parsed_landlord_staying,parsed_total_bedrooms,parsed_total_bathrooms,parsed_current_occupants_count,parsed_bathroom_shared_with_count,parsed_gender_preference,parsed_wechat,parsed_phone,parsed_is_owner_direct,parsed_is_agent,parsed_is_sublet,parsed_utilities_policy,parsed_aircon_policy,parsed_cooking_policy,parsed_visitors_policy,parsed_smoking_policy,parsed_pets_policy,parsed_tenant_type_preference,parsed_facilities,updated_at")
     .eq("id", candidateId)
     .in("import_status", ["parsed", "needs_review", "approved"])
     .is("listing_id", null)
     .maybeSingle();
+  const facilitiesColumnMissing = primaryResult.error?.code === "42703"
+    && primaryResult.error.message.includes("parsed_facilities");
+  const fallbackResult = facilitiesColumnMissing
+    ? await supabase
+      .from("listing_import_candidates")
+      .select("id,candidate_no,ingestion_listing_id,source,source_url,parsed_title,parsed_description,parsed_description_clean,parsed_rent_amount,parsed_deposit_amount,parsed_postal_code,parsed_mrt,parsed_listing_type,parsed_room_type,parsed_available_from,parsed_available_note,parsed_min_lease_months,parsed_max_occupants,parsed_registration_allowed,parsed_landlord_staying,parsed_total_bedrooms,parsed_total_bathrooms,parsed_current_occupants_count,parsed_bathroom_shared_with_count,parsed_gender_preference,parsed_wechat,parsed_phone,parsed_is_owner_direct,parsed_is_agent,parsed_is_sublet,parsed_utilities_policy,parsed_aircon_policy,parsed_cooking_policy,parsed_visitors_policy,parsed_smoking_policy,parsed_pets_policy,parsed_tenant_type_preference,updated_at")
+      .eq("id", candidateId)
+      .in("import_status", ["parsed", "needs_review", "approved"])
+      .is("listing_id", null)
+      .maybeSingle()
+    : null;
+  const error = fallbackResult ? fallbackResult.error : primaryResult.error;
+  const data = fallbackResult?.data
+    ? { ...fallbackResult.data, parsed_facilities: null }
+    : primaryResult.data;
 
   if (error || !data) return null;
 
   const postalCode = data.parsed_postal_code;
-  const [geocoding, commute, ingestion] = await Promise.all([
+  if (!postalCode && !data.parsed_mrt) return null;
+
+  const [geocoding, commute, nearbyRows, ingestion] = await Promise.all([
     postalCode
       ? supabase
         .from("geocoding_cache")
@@ -694,6 +780,12 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
         .eq("postal_code", postalCode)
         .maybeSingle()
       : Promise.resolve({ data: null }),
+    postalCode
+      ? supabase
+        .from("nearby_places_cache")
+        .select("place_type,name,distance_meters,walking_minutes")
+        .eq("postal_code", postalCode)
+      : Promise.resolve({ data: [] }),
     supabase
       .from("ingestion_listings")
       .select("listing_url,detail_url,list_raw_html,raw_detail_html")
@@ -705,6 +797,11 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
     [ingestion.data?.raw_detail_html, ingestion.data?.list_raw_html],
     pageUrl
   );
+  const structuredFacts = extractListingStructuredFacts(data.parsed_description_clean ?? data.parsed_description);
+  const fallbackAvailability = parseListingAvailability(data.parsed_description_clean ?? data.parsed_description);
+  const baseDescriptionClean = cleanPublicListingDescription(data.parsed_description_clean ?? data.parsed_description, data.parsed_title);
+  const parsedFacilities = normalizeParsedFacilities(data.parsed_facilities, data.parsed_description_clean ?? data.parsed_description);
+  const descriptionClean = removeExtractedFacilityText(baseDescriptionClean);
 
   return {
     id: `candidate-${data.id}`,
@@ -712,21 +809,22 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
     listing_no: null,
     title: data.parsed_title ?? "未命名网络房源",
     rent_amount: data.parsed_rent_amount ?? 0,
-    room_type: data.parsed_room_type,
+    room_type: data.parsed_room_type ?? structuredFacts.room_type,
     postal_code: postalCode,
-    available_from: data.parsed_available_from,
-    available_note: data.parsed_available_note,
-    min_lease_months: data.parsed_min_lease_months,
+    mrt: data.parsed_mrt,
+    available_from: data.parsed_available_from ?? structuredFacts.available_from ?? fallbackAvailability.date,
+    available_note: data.parsed_available_note ?? structuredFacts.available_note ?? fallbackAvailability.note,
+    min_lease_months: data.parsed_min_lease_months ?? structuredFacts.min_lease_months,
     cooking_policy: data.parsed_cooking_policy as ListingDetail["cooking_policy"],
     registration_allowed: data.parsed_registration_allowed,
     landlord_staying: data.parsed_landlord_staying,
     bathroom_shared_with_count: data.parsed_bathroom_shared_with_count,
     current_occupants_count: data.parsed_current_occupants_count,
-    description: data.parsed_description,
-    description_clean: data.parsed_description_clean,
+    description: null,
+    description_clean: descriptionClean,
     updated_at: data.updated_at,
     geocoding: geocoding.data ?? null,
-    ntu_commute: commute.data ?? null,
+    ntu_commute: build_listing_commute(postalCode, data.parsed_mrt, geocoding.data ?? null, commute.data ?? null),
     listing_images: candidateImages,
     card_source: "candidate",
     source_url: data.source_url,
@@ -735,7 +833,7 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
     listing_type: data.parsed_listing_type,
     deposit_amount: data.parsed_deposit_amount,
     max_occupants: data.parsed_max_occupants,
-    gender_preference: data.parsed_gender_preference,
+    gender_preference: data.parsed_gender_preference ?? structuredFacts.gender_preference,
     source: data.source,
     contact_visibility: null,
     wechat: data.parsed_wechat,
@@ -750,12 +848,28 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
     smoking_policy: data.parsed_smoking_policy as ListingDetail["smoking_policy"],
     pets_policy: data.parsed_pets_policy as ListingDetail["pets_policy"],
     tenant_type_preference: Array.isArray(data.parsed_tenant_type_preference) ? data.parsed_tenant_type_preference : [],
-    total_bedrooms: data.parsed_total_bedrooms,
-    total_bathrooms: data.parsed_total_bathrooms,
-    listing_facilities: [],
-    nearby_places_cache: [],
+    total_bedrooms: data.parsed_total_bedrooms ?? structuredFacts.total_bedrooms,
+    total_bathrooms: data.parsed_total_bathrooms ?? structuredFacts.total_bathrooms,
+    listing_facilities: parsedFacilities,
+    nearby_places_cache: nearbyRows.data ?? [],
     detail_source: "candidate"
   };
+}
+
+function normalizeParsedFacilities(value: unknown, fallbackText: string | null | undefined): NonNullable<ListingDetail["listing_facilities"]> {
+  const rows = Array.isArray(value) && value.length > 0 ? value : extractListingFacilities(fallbackText);
+  return rows.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const facility_name = "facility_name" in row ? String(row.facility_name) : "";
+    const availability = "availability" in row ? String(row.availability) : "available";
+    if (!facilities.includes(facility_name as (typeof facilities)[number])) return [];
+    if (!["available", "restricted", "not_available"].includes(availability)) return [];
+    return [{
+      facility_name,
+      availability: availability as FacilityAvailability,
+      note: "note" in row && typeof row.note === "string" && row.note.trim() ? row.note.trim() : null
+    }];
+  });
 }
 
 function extractCandidateImages(
@@ -773,7 +887,10 @@ function extractCandidateImages(
       const candidates = [
         node.attr("data-src"),
         node.attr("data-original"),
+        node.attr("data-original-src"),
         node.attr("data-lazy-src"),
+        node.attr("data-lazyload"),
+        node.attr("data-url"),
         node.attr("src"),
         node.attr("srcset")?.split(",")[0]?.trim().split(/\s+/)[0]
       ];

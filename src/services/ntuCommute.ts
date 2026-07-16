@@ -1,11 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { haversineDistanceKm, NTU_CENTER } from "../../lib/ntuDistance";
 import { getOneMapAccessToken } from "./oneMapToken";
 
-export const NTU_CENTER = {
-  latitude: 1.3483,
-  longitude: 103.6831,
-  name: "Nanyang Technological University"
-} as const;
+export { haversineDistanceKm, NTU_CENTER } from "../../lib/ntuDistance";
 
 const DEFAULT_ROUTE_TIME = "08:30:00";
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -77,7 +74,7 @@ export async function enrichNtuCommuteCache(
   const now = new Date();
   const now_iso = now.toISOString();
 
-  const postal_codes = await getPublishedPostalCodes(supabase, options.postalCode);
+  const postal_codes = await getEligiblePostalCodes(supabase, options.postalCode);
   const geocoding_rows = await getSuccessfulGeocoding(supabase, postal_codes);
   const cache_rows = await getCommuteCache(supabase, geocoding_rows.map((row) => row.postal_code));
   const cache_by_postal_code = new Map(cache_rows.map((row) => [row.postal_code, row]));
@@ -185,17 +182,39 @@ export async function enrichNtuCommuteCache(
   return summary;
 }
 
-async function getPublishedPostalCodes(supabase: SupabaseClient, postal_code?: string): Promise<string[]> {
-  let query = supabase
+async function getEligiblePostalCodes(supabase: SupabaseClient, postal_code?: string): Promise<string[]> {
+  let published_query = supabase
     .from("listings")
     .select("postal_code")
     .eq("status", "published")
     .not("postal_code", "is", null);
-  if (postal_code) query = query.eq("postal_code", postal_code);
+  let candidate_query = supabase
+    .from("listing_import_candidates")
+    .select("parsed_postal_code")
+    .in("import_status", ["parsed", "needs_review", "approved"])
+    .is("listing_id", null)
+    .not("parsed_title", "is", null)
+    .not("parsed_rent_amount", "is", null)
+    .not("parsed_postal_code", "is", null);
+  if (postal_code) {
+    published_query = published_query.eq("postal_code", postal_code);
+    candidate_query = candidate_query.eq("parsed_postal_code", postal_code);
+  }
 
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return [...new Set((data ?? []).map((row) => row.postal_code).filter(isPostalCode))];
+  const [published_result, candidate_result] = await Promise.all([published_query, candidate_query]);
+  if (published_result.error) throw new Error(published_result.error.message);
+  if (candidate_result.error) throw new Error(candidate_result.error.message);
+  return collectEligiblePostalCodes(published_result.data ?? [], candidate_result.data ?? []);
+}
+
+export function collectEligiblePostalCodes(
+  published_rows: Array<{ postal_code: string | null }>,
+  candidate_rows: Array<{ parsed_postal_code: string | null }>
+): string[] {
+  return [...new Set([
+    ...published_rows.map((row) => row.postal_code),
+    ...candidate_rows.map((row) => row.parsed_postal_code)
+  ].filter(isPostalCode))];
 }
 
 async function getSuccessfulGeocoding(
@@ -377,32 +396,10 @@ async function routeOneMap(
   };
 }
 
-export function haversineDistanceKm(
-  start_latitude: number,
-  start_longitude: number,
-  end_latitude: number,
-  end_longitude: number
-): number {
-  const earth_radius_km = 6371.0088;
-  const latitude_delta = degreesToRadians(end_latitude - start_latitude);
-  const longitude_delta = degreesToRadians(end_longitude - start_longitude);
-  const start_latitude_radians = degreesToRadians(start_latitude);
-  const end_latitude_radians = degreesToRadians(end_latitude);
-  const a = Math.sin(latitude_delta / 2) ** 2 +
-    Math.cos(start_latitude_radians) *
-    Math.cos(end_latitude_radians) *
-    Math.sin(longitude_delta / 2) ** 2;
-  return earth_radius_km * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 export function classifyNtuDistance(distance_km: number): NtuDistanceBand {
   if (distance_km <= HIGH_PRIORITY_DISTANCE_KM) return "high_priority";
   if (distance_km <= MAX_DISTANCE_KM) return "low_priority";
   return "skipped_far";
-}
-
-function degreesToRadians(degrees: number): number {
-  return degrees * Math.PI / 180;
 }
 
 function roundDistance(value: number): number {

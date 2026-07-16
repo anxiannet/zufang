@@ -157,11 +157,14 @@ export async function setListingImportCandidateStatus(formData: FormData) {
   const now = new Date().toISOString();
   const { data: current, error: read_error } = await supabase
     .from("listing_import_candidates")
-    .select("import_status,parse_warnings")
+    .select("import_status,parse_warnings,parsed_postal_code")
     .eq("id", id)
     .single();
   if (read_error || current.import_status === "imported") {
     redirect("/admin/listing-imports?error=protected_candidate");
+  }
+  if (status === "parsed" && !current.parsed_postal_code) {
+    redirect("/admin/listing-imports?error=missing_postal_code");
   }
 
   const update: Record<string, unknown> = {

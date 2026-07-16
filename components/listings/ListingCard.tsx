@@ -50,6 +50,9 @@ export function ListingCard({ listing }: { listing: ListingCardType }) {
             #{visibleNo}
           </span>
         </div>
+        <div className="absolute bottom-3 right-3 rounded-full bg-slate-950/75 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur">
+          发布 {formatUpdatedDate(listing.source_posted_at ?? listing.updated_at)}
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col p-4 sm:p-5">
@@ -138,10 +141,15 @@ function formatAddress(listing: ListingCardType) {
     listing.geocoding?.road_name
   ].filter(Boolean);
   if (parts.length > 0) return parts.join(" · ");
-  return listing.postal_code ? `新加坡 ${listing.postal_code}` : "具体地点待补充";
+  if (listing.postal_code) return `新加坡 ${listing.postal_code}`;
+  if (listing.mrt) return `${listing.mrt} MRT 附近（估算位置）`;
+  return "具体地点待补充";
 }
 
 function formatCommute(listing: ListingCardType) {
+  if (listing.ntu_commute?.is_estimated && listing.ntu_commute.ntu_bus_minutes != null) {
+    return `MRT 估算约 ${listing.ntu_commute.ntu_bus_minutes} 分钟`;
+  }
   if (listing.ntu_commute?.ntu_bus_minutes != null) return `公交约 ${listing.ntu_commute.ntu_bus_minutes} 分钟`;
   if (listing.ntu_commute?.ntu_drive_minutes != null) return `驾车约 ${listing.ntu_commute.ntu_drive_minutes} 分钟`;
   if (listing.ntu_commute?.ntu_straight_distance_km != null) {
@@ -159,4 +167,15 @@ function formatDate(value: string | null) {
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return "待补充";
   return new Intl.DateTimeFormat("zh-SG", { month: "short", day: "numeric" }).format(date);
+}
+
+function formatUpdatedDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "日期待补充";
+  return new Intl.DateTimeFormat("zh-SG", {
+    timeZone: "Asia/Singapore",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
 }

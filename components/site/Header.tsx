@@ -11,7 +11,7 @@ const navigation = [
   { href: "/", label: "首页" },
   { href: "/rent", label: "房源" },
   { href: "/landlord/listings/new", label: "发布房源" },
-  { href: "/about", label: "关于维界" }
+  { href: "/about", label: "关于我们" }
 ];
 
 export function Header({ is_admin = false }: { is_admin?: boolean }) {
@@ -26,7 +26,7 @@ export function Header({ is_admin = false }: { is_admin?: boolean }) {
             <Image src="/brand/weijie-mark.png" alt="维界" width={48} height={30} priority className="h-auto w-12" />
           </span>
           <span>
-            <span className="block text-base font-bold leading-none tracking-tight text-ink">维界租房</span>
+            <span className="block text-base font-bold leading-none tracking-tight text-ink">NTU租房数据库</span>
             <span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.13em] text-muted">Singapore · NTU</span>
           </span>
         </Link>

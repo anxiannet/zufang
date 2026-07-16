@@ -67,8 +67,9 @@ export default async function ListingDetailPage({
   const restrictedFacilities = facilities.filter((item) => item.availability === "restricted");
   const unavailableFacilities = facilities.filter((item) => item.availability === "not_available");
   const canShowContact = !isCandidate && (listing.contact_visibility === "public" || (listing.contact_visibility === "login_only" && Boolean(profile)));
-  const polishedDescription = listing.description_clean || listing.description;
-  const hasSeparateRawText = Boolean(listing.description && listing.description.trim() !== listing.description_clean?.trim());
+  const polishedDescription = listing.description_clean;
+  const canShowNearby = Boolean(listing.postal_code);
+  const nearbyGroups = groupNearbyPlaces(listing.nearby_places_cache ?? []);
 
   return (
     <div className="container-page py-6 sm:py-10">
@@ -110,13 +111,15 @@ export default async function ListingDetailPage({
 
           <Panel icon={BusFront} eyebrow="NTU Commute" title="交通与通勤">
             <div className="grid gap-3 sm:grid-cols-3">
-              <Metric icon={BusFront} label="公交到 NTU" value={minutesValue(listing.ntu_commute?.ntu_bus_minutes)} />
-              <Metric icon={Clock3} label="驾车到 NTU" value={minutesValue(listing.ntu_commute?.ntu_drive_minutes)} />
+              <Metric icon={BusFront} label={listing.ntu_commute?.is_estimated ? "公共交通到 NTU（估算）" : "公交到 NTU"} value={minutesValue(listing.ntu_commute?.ntu_bus_minutes)} />
+              <Metric icon={Clock3} label={listing.ntu_commute?.is_estimated ? "驾车到 NTU（估算）" : "驾车到 NTU"} value={minutesValue(listing.ntu_commute?.ntu_drive_minutes)} />
               <Metric icon={MapPinned} label="距 NTU 直线" value={distanceValue(listing.ntu_commute?.ntu_straight_distance_km)} />
             </div>
             <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-muted">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              通勤时间基于邮编与路线缓存估算，实际时间会受出发点、换乘和高峰交通影响。
+              {listing.ntu_commute?.is_estimated
+                ? `通勤路线缓存尚未完成，暂以 ${listing.ntu_commute.estimate_basis ?? "附近 MRT"} 作为起点估算时间；实际时间会受房源到地铁站距离、换乘和高峰交通影响。`
+                : "通勤时间基于邮编与路线缓存估算，实际时间会受出发点、换乘和高峰交通影响。"}
             </p>
           </Panel>
 
@@ -146,25 +149,28 @@ export default async function ListingDetailPage({
             {facilities.length === 0 ? <p className="text-sm text-muted">设施信息待补充。</p> : null}
           </Panel>
 
-          <Panel icon={MapPinned} eyebrow="Nearby" title="周边生活">
-            {(listing.nearby_places_cache ?? []).length > 0 ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {(listing.nearby_places_cache ?? []).map((place) => (
-                  <div key={`${place.place_type}-${place.name}`} className="rounded-xl border border-line bg-slate-50/70 p-3.5">
-                    <div className="font-semibold text-ink">{place.name}</div>
-                    <div className="mt-1 text-xs text-muted">{place.place_type} · {place.distance_meters}m · 步行约 {place.walking_minutes} 分钟</div>
-                  </div>
-                ))}
-              </div>
-            ) : <p className="text-sm text-muted">周边餐饮、超市与交通信息正在补充。</p>}
-          </Panel>
-
-          {hasSeparateRawText ? (
-            <details className="card p-5">
-              <summary className="cursor-pointer text-sm font-bold text-ink">原始信息参考</summary>
-              <p className="mt-4 whitespace-pre-line border-t border-line pt-4 text-sm leading-7 text-muted">{listing.description}</p>
-            </details>
+          {canShowNearby ? (
+            <Panel icon={MapPinned} eyebrow="Nearby" title="周边生活">
+              {nearbyGroups.length > 0 ? (
+                <div className="space-y-5">
+                  {nearbyGroups.map((group) => (
+                    <div key={group.place_type}>
+                      <div className="mb-2 text-xs font-bold text-muted">{nearbyPlaceLabels[group.place_type] ?? group.place_type}</div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {group.places.map((place) => (
+                          <div key={`${place.place_type}-${place.name}`} className="rounded-xl border border-line bg-slate-50/70 p-3.5">
+                            <div className="font-semibold text-ink">{place.name}</div>
+                            <div className="mt-1 text-xs text-muted">{place.display_note ?? `${place.distance_meters}m · 步行约 ${place.walking_minutes} 分钟`}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-sm text-muted">周边餐饮、超市与交通信息正在补充。</p>}
+            </Panel>
           ) : null}
+
         </div>
 
         <aside className="lg:sticky lg:top-24 lg:self-start">
@@ -297,6 +303,42 @@ function FacilityGroup({
       </div>
     </div>
   );
+}
+
+const nearbyPlaceLabels: Record<string, string> = {
+  mrt: "MRT",
+  bus_stop: "巴士站",
+  bus_terminal: "巴士总站",
+  food_court: "熟食中心",
+  supermarket: "超市",
+  mall: "商场",
+  school: "学校",
+  park: "公园"
+};
+
+const nearbyPlaceOrder = ["mrt", "bus_stop", "bus_terminal", "food_court", "supermarket", "mall", "school", "park"];
+
+function groupNearbyPlaces(
+  places: { place_type: string; name: string; distance_meters: number; walking_minutes: number; display_note?: string }[]
+) {
+  const grouped = new Map<string, typeof places>();
+  for (const place of places) {
+    const group = grouped.get(place.place_type) ?? [];
+    group.push(place);
+    grouped.set(place.place_type, group);
+  }
+
+  return [...grouped.entries()]
+    .sort(([left], [right]) => nearbyPlaceSortRank(left) - nearbyPlaceSortRank(right))
+    .map(([place_type, group]) => ({
+      place_type,
+      places: [...group].sort((left, right) => left.distance_meters - right.distance_meters)
+    }));
+}
+
+function nearbyPlaceSortRank(place_type: string) {
+  const index = nearbyPlaceOrder.indexOf(place_type);
+  return index >= 0 ? index : nearbyPlaceOrder.length;
 }
 
 function getReasons(listing: NonNullable<Awaited<ReturnType<typeof getListingDetail>>>) {

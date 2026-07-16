@@ -58,6 +58,11 @@ export type ParsedListingCandidate = {
   parsed_smoking_policy: string | null;
   parsed_pets_policy: string | null;
   parsed_tenant_type_preference: string[];
+  parsed_facilities: {
+    facility_name: string;
+    availability: "available" | "restricted" | "not_available";
+    note: string | null;
+  }[];
   parse_confidence: number;
   parse_warnings: string[];
 };

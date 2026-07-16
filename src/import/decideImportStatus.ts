@@ -1,4 +1,5 @@
 import type { CandidateImportStatus, ParsedListingCandidate } from "./types";
+import { assessNtuSuitability } from "../../lib/ntuSuitability";
 
 export function decideImportStatus(candidate: ParsedListingCandidate): {
   import_status: Extract<CandidateImportStatus, "parsed" | "needs_review" | "rejected">;
@@ -12,18 +13,34 @@ export function decideImportStatus(candidate: ParsedListingCandidate): {
   const non_rental = /招聘|求职|二手|出售手机|贷款|博彩|赌博|刷单|代购/i.test(text)
     && !/出租|租房|房间|主人房|普通房|整租/i.test(text);
   const scam = /保证金解冻|先付款后看房|稳赚|高额回报/i.test(text);
+  const ntu_suitability = assessNtuSuitability({
+    title: candidate.parsed_title,
+    description: candidate.parsed_description_clean,
+    postalCode: candidate.parsed_postal_code,
+    area: candidate.parsed_area,
+    mrt: candidate.parsed_mrt
+  });
 
-  if (non_rental || scam || abnormal_price) {
+  if (non_rental || scam || abnormal_price || ntu_suitability.suitable === false) {
     if (non_rental) warnings.push("疑似非租房内容");
     if (scam) warnings.push("疑似诈骗内容");
+    if (ntu_suitability.suitable === false) warnings.push(`不适合 NTU 学生：${ntu_suitability.reason}`);
     return { import_status: "rejected", parse_warnings: [...new Set(warnings)] };
+  }
+
+  if (!candidate.parsed_postal_code && !candidate.parsed_mrt) {
+    warnings.push("缺少邮编，不发布候选房源");
+    return { import_status: "rejected", parse_warnings: [...new Set(warnings)] };
+  }
+  if (!candidate.parsed_postal_code && candidate.parsed_mrt) {
+    warnings.push("缺少邮编，使用 MRT 位置估算");
   }
 
   const review_required = [
     !candidate.parsed_title || candidate.parsed_title.length < 4,
     !candidate.parsed_rent_amount,
-    !has_contact,
     !candidate.parsed_postal_code,
+    !has_contact,
     candidate.parsed_listing_type !== "whole_unit" && !candidate.parsed_room_type,
     candidate.parsed_room_type === "partition_room",
     candidate.parsed_room_type === "maid_room",

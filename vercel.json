@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/enrich-ntu-commute",
       "schedule": "30 20 * * *"
+    },
+    {
+      "path": "/api/cron/enrich-nearby-places",
+      "schedule": "45 20 * * *"
     }
   ]
 }

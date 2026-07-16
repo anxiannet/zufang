@@ -8,6 +8,20 @@ import type {
 
 const protected_statuses: CandidateImportStatus[] = ["approved", "imported", "rejected", "duplicate"];
 
+export function should_refresh_candidate(
+  existing: Pick<ListingImportCandidate, "import_status" | "updated_at"> | null | undefined,
+  scraped_at: string | null | undefined
+): boolean {
+  if (!existing) return true;
+  if (protected_statuses.includes(existing.import_status)) return false;
+  if (!scraped_at) return false;
+
+  const candidate_updated_at = Date.parse(existing.updated_at);
+  const source_scraped_at = Date.parse(scraped_at);
+  if (Number.isNaN(candidate_updated_at) || Number.isNaN(source_scraped_at)) return false;
+  return source_scraped_at > candidate_updated_at;
+}
+
 export async function getPendingIngestionListings(
   supabase: SupabaseClient,
   limit = 50,
@@ -33,13 +47,18 @@ export async function getPendingIngestionListings(
     const ids = data.map((row) => row.id);
     const { data: existing, error: existing_error } = await supabase
       .from("listing_import_candidates")
-      .select("ingestion_listing_id")
+      .select("ingestion_listing_id,import_status,updated_at")
       .in("ingestion_listing_id", ids);
     if (existing_error) throw new Error(existing_error.message);
 
-    const existing_ids = new Set((existing ?? []).map((row) => Number(row.ingestion_listing_id)));
+    const existing_by_ingestion_id = new Map(
+      (existing ?? []).map((candidate) => [Number(candidate.ingestion_listing_id), candidate])
+    );
     for (const row of data) {
-      if (!existing_ids.has(Number(row.id))) output.push(row as IngestionListing);
+      const candidate = existing_by_ingestion_id.get(Number(row.id));
+      if (should_refresh_candidate(candidate as Pick<ListingImportCandidate, "import_status" | "updated_at"> | undefined, row.scraped_at)) {
+        output.push(row as IngestionListing);
+      }
       if (output.length >= limit) break;
     }
 
@@ -240,6 +259,19 @@ export async function importCandidateToListing(
     throw new Error(listing_error?.message ?? "Listing insert failed");
   }
 
+  const facilityRows = normalizeParsedFacilities(candidate.parsed_facilities).map((facility) => ({
+    listing_id: listing.id,
+    facility_name: facility.facility_name,
+    availability: facility.availability,
+    note: facility.note
+  }));
+  if (facilityRows.length > 0) {
+    const { error: facility_error } = await supabase
+      .from("listing_facilities")
+      .upsert(facilityRows, { onConflict: "listing_id,facility_name" });
+    if (facility_error) throw new Error(facility_error.message);
+  }
+
   const { error: update_error } = await supabase
     .from("listing_import_candidates")
     .update({
@@ -255,6 +287,25 @@ export async function importCandidateToListing(
   if (update_error) throw new Error(update_error.message);
 
   return { listing_id: listing.id };
+}
+
+function normalizeParsedFacilities(value: unknown): Array<{
+  facility_name: string;
+  availability: "available" | "restricted" | "not_available";
+  note: string | null;
+}> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const facility_name = "facility_name" in row ? String(row.facility_name) : "";
+    const availability = "availability" in row ? String(row.availability) : "available";
+    if (!facility_name || !["available", "restricted", "not_available"].includes(availability)) return [];
+    return [{
+      facility_name,
+      availability: availability as "available" | "restricted" | "not_available",
+      note: "note" in row && typeof row.note === "string" && row.note.trim() ? row.note.trim() : null
+    }];
+  });
 }
 
 function mapFormalListingSource(value: string | null): "owner_submit" | "wechat_group" | "zufang" | "xiaohongshu" | "manual" {

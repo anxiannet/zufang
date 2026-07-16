@@ -6,8 +6,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "维界租房 | 新加坡 NTU 周边真实房源数据库",
-    template: "%s | 维界租房"
+    default: "NTU租房数据库",
+    template: "%s | NTU租房数据库"
   },
   description: "按通勤、价格、房型和入住条件筛选新加坡 NTU 周边房源，帮助学生与屋主更高效匹配。"
 };

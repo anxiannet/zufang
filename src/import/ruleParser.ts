@@ -1,4 +1,8 @@
 import { extractPhone, extractWechat } from "../parser/contactParser";
+import { parseListingAvailability } from "../../lib/listingDates";
+import { cleanPublicListingDescription } from "../../lib/listingDescription";
+import { extractListingFacilities, removeExtractedFacilityText } from "../../lib/listingFacilities";
+import { extractListingStructuredFacts } from "../../lib/listingStructuredFacts";
 import type { ParsedListingCandidate } from "./types";
 
 type ParseInput = {
@@ -19,6 +23,7 @@ const locations = [
   { pattern: /Pioneer|先驱/i, area: "Jurong West", mrt: "Pioneer" },
   { pattern: /Jurong\s+West|裕廊西/i, area: "Jurong West", mrt: null },
   { pattern: /Clementi|金文泰/i, area: "Clementi", mrt: "Clementi" },
+  { pattern: /Cashew|凯秀/i, area: "Bukit Panjang", mrt: "Cashew" },
   { pattern: /Khatib|卡迪/i, area: "Khatib", mrt: "Khatib" },
   { pattern: /Yishun|义顺/i, area: "Yishun", mrt: "Yishun" },
   { pattern: /\bNUS\b/i, area: "NUS", mrt: null },
@@ -29,11 +34,15 @@ export function parseListingByRules(input: ParseInput): ParsedListingCandidate {
   const text = `${input.title ?? ""}\n${input.cleanText}\n${input.listContact ?? ""}`.trim();
   const warnings: string[] = [];
   const title = normalizeTitle(input.title ?? firstLine(input.cleanText));
+  const public_description_clean = cleanPublicListingDescription(input.cleanText, title);
+  const parsed_facilities = extractListingFacilities(input.cleanText);
+  const description_without_facilities = removeExtractedFacilityText(public_description_clean);
+  const structured_facts = extractListingStructuredFacts(input.cleanText);
   const rent_amount = parseRent(input.listPrice, text, warnings);
   const phone = extractPhone(`${input.listContact ?? ""}\n${text}`);
   const postal_code = parsePostalCode(text, phone);
   const location = locations.find((item) => item.pattern.test(text));
-  const room_type = parseRoomType(input.title ?? "", text);
+  const room_type = structured_facts.room_type ?? parseRoomType(input.title ?? "", text);
   const listing_type = parseListingType(text);
   const available = parseAvailable(text);
   const registration = parseBooleanPolicy(
@@ -65,7 +74,7 @@ export function parseListingByRules(input: ParseInput): ParsedListingCandidate {
   const candidate: ParsedListingCandidate = {
     parsed_title: title,
     parsed_description: input.rawText || null,
-    parsed_description_clean: input.cleanText || null,
+    parsed_description_clean: description_without_facilities,
     parsed_rent_amount: rent_amount,
     parsed_deposit_amount: parseMoneyAfter(text, /押金|deposit/i),
     parsed_postal_code: postal_code,
@@ -73,17 +82,17 @@ export function parseListingByRules(input: ParseInput): ParsedListingCandidate {
     parsed_mrt: location?.mrt ?? null,
     parsed_listing_type: listing_type,
     parsed_room_type: listing_type === "whole_unit" ? null : room_type,
-    parsed_available_from: available.date,
-    parsed_available_note: available.note,
-    parsed_min_lease_months: parseLeaseMonths(text),
+    parsed_available_from: available.date ?? structured_facts.available_from,
+    parsed_available_note: available.note ?? structured_facts.available_note,
+    parsed_min_lease_months: parseLeaseMonths(text) ?? structured_facts.min_lease_months,
     parsed_max_occupants: parseMaxOccupants(text),
     parsed_registration_allowed: registration,
     parsed_landlord_staying: landlord_staying,
-    parsed_total_bedrooms: parseCount(text, /(?:整套|全屋|共有)\s*(\d+)\s*(?:房|卧)/i),
-    parsed_total_bathrooms: parseCount(text, /(?:整套|全屋|共有)\s*(\d+)\s*(?:厕|卫)/i),
+    parsed_total_bedrooms: parseCount(text, /(?:整套|全屋|共有)\s*(\d+)\s*(?:房|卧)/i) ?? structured_facts.total_bedrooms,
+    parsed_total_bathrooms: parseCount(text, /(?:整套|全屋|共有)\s*(\d+)\s*(?:厕|卫)/i) ?? structured_facts.total_bathrooms,
     parsed_current_occupants_count: parseCount(text, /(?:现住|目前住|当前住)\s*(\d+)\s*人/i),
     parsed_bathroom_shared_with_count: parseCount(text, /(?:共用厕所|共浴|厕所共用)\s*(\d+)\s*人/i),
-    parsed_gender_preference: parseGender(text),
+    parsed_gender_preference: structured_facts.gender_preference ?? parseGender(text),
     parsed_wechat: extractWechat(text),
     parsed_phone: phone,
     parsed_is_owner_direct: /屋主直租|房东本人|不是中介|非中介/i.test(text),
@@ -96,6 +105,7 @@ export function parseListingByRules(input: ParseInput): ParsedListingCandidate {
     parsed_smoking_policy: parseSmoking(text),
     parsed_pets_policy: parsePets(text),
     parsed_tenant_type_preference: parseTenantTypes(text),
+    parsed_facilities,
     parse_confidence: 0,
     parse_warnings: warnings
   };
@@ -128,12 +138,29 @@ function parseMoneyAfter(text: string, label: RegExp): number | null {
 }
 
 function parsePostalCode(text: string, phone: string | null): string | null {
-  const candidates = Array.from(text.matchAll(/(?<!\d)(\d{6})(?!\d)/g)).map((match) => match[1]);
-  return candidates.find((value) => value !== phone && !looksLikePriceContext(text, value)) ?? null;
+  const explicit_patterns = [
+    /(?:邮编|邮政编码|postal\s*code)\s*[:：#]?\s*(\d{6})/i,
+    /Singapore\s*[:：,]?\s*(\d{6})/i
+  ];
+  for (const pattern of explicit_patterns) {
+    const value = text.match(pattern)?.[1];
+    if (value && value !== phone && !looksLikePriceContext(text, value)) return value;
+  }
+
+  const candidates = Array.from(text.matchAll(/(?<![A-Za-z0-9])(\d{6})(?![A-Za-z0-9])/g)).map((match) => match[1]);
+  return candidates.find((value) =>
+    value !== phone &&
+    !looksLikePriceContext(text, value) &&
+    !looksLikeAccountContext(text, value)
+  ) ?? null;
 }
 
 function looksLikePriceContext(text: string, value: string): boolean {
   return new RegExp(`(?:S\\$|SGD|\\$)\\s*${value}|${value}\\s*(?:\\/月|每月)`, "i").test(text);
+}
+
+function looksLikeAccountContext(text: string, value: string): boolean {
+  return new RegExp(`(?:微信|wechat|账号|ID)\\s*[:：]?\\s*[A-Za-z_]*${value}`, "i").test(text);
 }
 
 function parseRoomType(title: string, text: string): string | null {
@@ -157,10 +184,7 @@ function parseListingType(text: string): string {
 }
 
 function parseAvailable(text: string): { date: string | null; note: string | null } {
-  if (/马上入住|立即入住|即刻入住|随时入住/.test(text)) return { date: null, note: "马上入住" };
-  const iso = text.match(/(?:入住|available\s*from)?\s*(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})/i);
-  if (iso) return { date: `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`, note: null };
-  return { date: null, note: null };
+  return parseListingAvailability(text);
 }
 
 function parseBooleanPolicy(text: string, false_pattern: RegExp, true_pattern: RegExp): boolean | null {
@@ -194,7 +218,7 @@ function parseAircon(text: string): string | null {
 function parseCooking(text: string): string | null {
   if (/不可煮|不能煮|不可以煮|禁煮|no\s*cooking/i.test(text)) return "no";
   if (/轻煮|简煮|少煮|小煮/.test(text)) return "light";
-  if (/可煮|可以煮|厨房随便用/.test(text)) return "full";
+  if (/可煮|可以煮|厨房随便用|厨房是公共区域|公共厨房|公用厨房|共用厨房|灶台.{0,8}明火|明火.{0,8}灶台/.test(text)) return "full";
   return null;
 }
 
