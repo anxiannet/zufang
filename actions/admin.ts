@@ -40,6 +40,70 @@ export async function rejectListing(formData: FormData) {
     .eq("id", listingId);
   if (error) throw new Error(error.message);
   revalidatePath("/admin");
+  revalidatePath("/");
+  revalidatePath("/rent");
+}
+
+export async function rejectHomepageListing(formData: FormData) {
+  const profile = await requireRole(["admin"]);
+  const listingId = String(formData.get("listing_id") ?? "").trim();
+  const cardSource = String(formData.get("card_source") ?? "").trim();
+  const supabase = createAdminClient();
+
+  if (cardSource === "candidate") {
+    const candidateId = listingId.startsWith("candidate-")
+      ? listingId.slice("candidate-".length)
+      : listingId;
+    if (!isUuid(candidateId)) throw new Error("无效的候选房源编号");
+
+    const { data: candidate, error: readError } = await supabase
+      .from("listing_import_candidates")
+      .select("id,import_status,parse_warnings")
+      .eq("id", candidateId)
+      .in("import_status", ["parsed", "needs_review", "approved"])
+      .is("listing_id", null)
+      .maybeSingle();
+    if (readError) throw new Error(readError.message);
+    if (!candidate) throw new Error("该候选房源已不可拒绝，请刷新页面后重试");
+
+    const now = new Date().toISOString();
+    const parseWarnings = Array.isArray(candidate.parse_warnings) ? candidate.parse_warnings : [];
+    const { data: updatedCandidate, error } = await supabase
+      .from("listing_import_candidates")
+      .update({
+        import_status: "rejected",
+        parse_warnings: [...new Set([...parseWarnings, "管理员从首页拒绝房源"])],
+        reviewed_by: profile.id,
+        reviewed_at: now,
+        updated_at: now
+      })
+      .eq("id", candidateId)
+      .in("import_status", ["parsed", "needs_review", "approved"])
+      .is("listing_id", null)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!updatedCandidate) throw new Error("该候选房源已不可拒绝，请刷新页面后重试");
+  } else if (cardSource === "official") {
+    if (!isUuid(listingId)) throw new Error("无效的正式房源编号");
+
+    const { data, error } = await supabase
+      .from("listings")
+      .update({ status: "rejected", rejection_reason: "管理员从首页拒绝房源" })
+      .eq("id", listingId)
+      .eq("status", "published")
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error("该正式房源已不可拒绝，请刷新页面后重试");
+  } else {
+    throw new Error("无效的房源来源");
+  }
+
+  revalidatePath("/");
+  revalidatePath("/rent");
+  revalidatePath("/admin");
+  revalidatePath("/admin/listing-imports");
 }
 
 export async function unpublishListing(listingId: string) {
@@ -357,6 +421,10 @@ function requiredEnum(formData: FormData, key: string, allowed: Set<string>) {
 function nullableEnum(formData: FormData, key: string, allowed: Set<string>) {
   const value = nullableText(formData, key);
   return value === null ? null : enumValue(value, allowed);
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function revalidateListingPaths(listingId: string) {

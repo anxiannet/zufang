@@ -4,6 +4,7 @@ import { Check, ClipboardCheck, Eye, ShieldCheck } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { getListingDetail } from "@/actions/listings";
 import { getCurrentProfile } from "@/lib/auth";
+import { getListingHref } from "@/lib/listingUrl";
 
 export const metadata: Metadata = {
   title: "房源已提交"
@@ -96,7 +97,7 @@ export default async function ListingSubmittedPage({
           </div>
 
           <div className="flex flex-col gap-3 border-t border-line pt-6 sm:flex-row sm:flex-wrap">
-            <Link href={`/rent/${listing.id}`} className="btn-primary">
+            <Link href={getListingHref(listing)} className="btn-primary">
               查看房源详情
             </Link>
             <Link href="/landlord/listings" className="btn-secondary">

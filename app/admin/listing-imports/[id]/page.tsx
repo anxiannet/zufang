@@ -3,6 +3,7 @@ import {
   getListingImportCandidateDetail,
   updateListingImportCandidate
 } from "@/actions/listingImports";
+import { Badge } from "@/components/ui/Badge";
 import { getCurrentProfile } from "@/lib/auth";
 import { formatSingaporeMediumDateTime } from "@/lib/dateTime";
 
@@ -57,7 +58,10 @@ export default async function ListingImportCandidateDetailPage({ params, searchP
           <div className="text-sm text-muted">
             <Link href="/admin">后台</Link> / <Link href="/admin/listing-imports">候选房源</Link> / {candidate_label}
           </div>
-          <h1 className="mt-1 text-2xl font-bold text-ink">{candidate.parsed_title || "无标题候选房源"}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold text-ink">{candidate.parsed_title || "无标题候选房源"}</h1>
+            {candidate.import_status === "parsed" ? <Badge tone="success">已发布</Badge> : null}
+          </div>
           <p className="mt-1 text-sm text-muted">
             {candidate.source} / {candidate.source_id || "-"} · 状态 {candidate.import_status} · 解析置信度 {candidate.parse_confidence ?? "-"}
           </p>

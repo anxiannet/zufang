@@ -17,6 +17,7 @@ export type IngestionListing = {
   list_title: string | null;
   list_price: number | null;
   list_contact: string | null;
+  list_raw_html: string | null;
   list_raw_text: string | null;
   raw_detail_html: string | null;
   scraped_at?: string | null;

@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { enrichNtuCommuteCache } from "../src/services/ntuCommute";
+import { enrichPostalGeocodingCache } from "../src/services/postalGeocoding";
 import { config } from "../src/utils/config";
 
 async function main() {
@@ -18,9 +19,12 @@ async function main() {
     auth: { autoRefreshToken: false, persistSession: false }
   });
 
-  const summary = await enrichNtuCommuteCache(supabase, { limit, postalCode, dryRun, force });
-  console.log(JSON.stringify(summary, null, 2));
-  if (summary.failed_count > 0) process.exitCode = 1;
+  const geocoding = dryRun
+    ? null
+    : await enrichPostalGeocodingCache(supabase, { limit, postalCode });
+  const commute = await enrichNtuCommuteCache(supabase, { limit, postalCode, dryRun, force });
+  console.log(JSON.stringify({ geocoding, commute }, null, 2));
+  if ((geocoding?.failed_count ?? 0) > 0 || commute.failed_count > 0) process.exitCode = 1;
 }
 
 main().catch((error) => {

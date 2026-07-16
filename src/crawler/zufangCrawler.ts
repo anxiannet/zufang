@@ -233,7 +233,7 @@ async function crawlTargetInternal(target: CrawlTarget, options: Required<CrawlO
         });
       }
 
-      if (await hasExistingRawDetail(listing.source, listing.sourceId)) {
+      if (await hasExistingRawDetail(listing.source, listing.sourceId, listing.listRawHtml)) {
         stats.listingsSkipped += 1;
         logger.skip("listing detail already crawled, skip detail update", {
           page,

@@ -48,8 +48,52 @@
 - 通勤分析
 - AI标签
 - AI简介
+- 图片有效性自动审核（OCR + 视觉分类）
 - 收藏系统
 - 浏览统计
+
+## 图片有效性自动审核
+
+目标：避免把“有图片但没有房源实景”的候选房源误判为有效房源。
+
+处理流程：
+
+1. 同时提取 `<img>`、图片链接 `href` 和延迟加载属性中的图片地址
+2. 使用本地规则过滤 Logo、二维码、占位图、过小图片和纯色图片
+3. 使用 OCR 检测纯文字广告和图片文字占比
+4. 使用视觉模型把图片分类为：
+   - `room_scene`
+   - `bathroom_scene`
+   - `kitchen_scene`
+   - `living_room_scene`
+   - `building_scene`
+   - `floor_plan`
+   - `text_only_ad`
+   - `qr_code`
+   - `unrelated`
+5. 至少存在一张有效房源实景图才允许自动通过
+6. 所有图片均无效时自动拒绝；置信度不足时进入人工审核
+
+建议保存结构化结果：
+
+```ts
+{
+  image_type: string
+  has_property_scene: boolean
+  ocr_text_detected: boolean
+  confidence: number
+  review_decision: "accepted" | "needs_review" | "rejected"
+  review_reason?: string
+}
+```
+
+验收标准：
+
+- 能识别只有文字广告图的候选房源
+- 能识别有效的卧室、卫生间、厨房和客厅实景图
+- 不因单张无效图片拒绝仍包含有效实景图的房源
+- 自动拒绝时保存明确原因，例如“图片仅包含出租文字广告，无房源实景”
+- 支持人工复核和纠正分类结果
 
 ---
 

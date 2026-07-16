@@ -8,13 +8,17 @@ import { createClient } from "@/lib/supabase/server";
 export async function createEnquiry(formData: FormData) {
   const profile = await getCurrentProfile();
   const listingId = String(formData.get("listing_id"));
+  const requestedPath = String(formData.get("listing_path") ?? "");
+  const listingPath = /^\/rent\/(?:\d{5}|C\d{4})$/i.test(requestedPath)
+    ? requestedPath
+    : `/rent/${listingId}`;
 
   if (!profile) {
-    redirect(`/auth/login?next=/rent/${listingId}&reason=enquiry`);
+    redirect(`/auth/login?next=${listingPath}&reason=enquiry`);
   }
 
   if (!["tenant", "admin"].includes(profile.role)) {
-    redirect(`/rent/${listingId}?error=enquiry_role`);
+    redirect(`${listingPath}?error=enquiry_role`);
   }
 
   const supabase = await createClient();
@@ -28,5 +32,5 @@ export async function createEnquiry(formData: FormData) {
   });
 
   if (error) throw new Error(error.message);
-  revalidatePath(`/rent/${listingId}`);
+  revalidatePath(listingPath);
 }

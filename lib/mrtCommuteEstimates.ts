@@ -12,12 +12,68 @@ type MrtEstimate = {
 
 const mrt_estimates: MrtEstimate[] = [
   {
+    canonical_name: "Ang Mo Kio",
+    aliases: ["ang mo kio", "amk", "宏茂桥"],
+    latitude: 1.36993284962264,
+    longitude: 103.849558091776,
+    ntu_public_transport_minutes: 79,
+    ntu_drive_minutes: 37
+  },
+  {
+    canonical_name: "Boon Lay",
+    aliases: ["boon lay", "文礼"],
+    latitude: 1.33860405469845,
+    longitude: 103.706064622772,
+    ntu_public_transport_minutes: 20,
+    ntu_drive_minutes: 11
+  },
+  {
+    canonical_name: "Pioneer",
+    aliases: ["pioneer", "先驱"],
+    latitude: 1.33758701106708,
+    longitude: 103.697321608474,
+    ntu_public_transport_minutes: 16,
+    ntu_drive_minutes: 9
+  },
+  {
+    canonical_name: "Chinese Garden",
+    aliases: ["chinese garden", "裕华园"],
+    latitude: 1.3425,
+    longitude: 103.7325,
+    ntu_public_transport_minutes: 30,
+    ntu_drive_minutes: 15
+  },
+  {
+    canonical_name: "Clementi",
+    aliases: ["clementi", "金文泰"],
+    latitude: 1.31511625277378,
+    longitude: 103.765191452888,
+    ntu_public_transport_minutes: 35,
+    ntu_drive_minutes: 22
+  },
+  {
     canonical_name: "Cashew",
     aliases: ["cashew", "凯秀"],
-    latitude: 1.368975,
-    longitude: 103.764803,
-    ntu_public_transport_minutes: 70,
-    ntu_drive_minutes: 14
+    latitude: 1.36984601365741,
+    longitude: 103.764315051619,
+    ntu_public_transport_minutes: 67,
+    ntu_drive_minutes: 21
+  },
+  {
+    canonical_name: "Khatib",
+    aliases: ["khatib", "卡迪"],
+    latitude: 1.41738337009565,
+    longitude: 103.832979908243,
+    ntu_public_transport_minutes: 72,
+    ntu_drive_minutes: 37
+  },
+  {
+    canonical_name: "Yishun",
+    aliases: ["yishun", "义顺"],
+    latitude: 1.42944308477331,
+    longitude: 103.835005047246,
+    ntu_public_transport_minutes: 69,
+    ntu_drive_minutes: 39
   }
 ];
 

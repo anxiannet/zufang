@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { extract_candidate_images } from "../../lib/candidateImages";
 import type {
   CandidateImportStatus,
   IngestionListing,
@@ -34,7 +35,7 @@ export async function getPendingIngestionListings(
   while (output.length < limit) {
     let query = supabase
       .from("ingestion_listings")
-      .select("id,source,source_id,listing_url,detail_url,list_title,list_price,list_contact,list_raw_text,raw_detail_html,scraped_at,created_at,last_seen_at")
+      .select("id,source,source_id,listing_url,detail_url,list_title,list_price,list_contact,list_raw_html,list_raw_text,raw_detail_html,scraped_at,created_at,last_seen_at")
       .eq("removed_from_source", false)
       .order("last_seen_at", { ascending: false, nullsFirst: false })
       .range(offset, offset + page_size - 1);
@@ -161,6 +162,33 @@ export async function importCandidateToListing(
   if (candidate_error || !candidate) throw new Error(candidate_error?.message ?? "Candidate not found");
   if (!["parsed", "needs_review"].includes(candidate.import_status)) throw new Error("Candidate must be published or under review before import");
   if (candidate.listing_id) throw new Error("Candidate has already been imported");
+
+  const { data: ingestion, error: ingestion_error } = await supabase
+    .from("ingestion_listings")
+    .select("listing_url,detail_url,list_raw_html,raw_detail_html")
+    .eq("id", candidate.ingestion_listing_id)
+    .maybeSingle();
+  if (ingestion_error) throw new Error(ingestion_error.message);
+
+  const candidate_images = extract_candidate_images({
+    detail_html: ingestion?.raw_detail_html,
+    list_html: ingestion?.list_raw_html,
+    page_url: candidate.source_url ?? ingestion?.detail_url ?? ingestion?.listing_url
+  });
+  if (candidate_images.length === 0) {
+    const now = new Date().toISOString();
+    const { error: reject_error } = await supabase
+      .from("listing_import_candidates")
+      .update({
+        import_status: "rejected",
+        parse_warnings: [...new Set([...(candidate.parse_warnings ?? []), "无有效房源图片，直接拒绝"])],
+        updated_at: now
+      })
+      .eq("id", candidate.id)
+      .in("import_status", ["parsed", "needs_review"]);
+    if (reject_error) throw new Error(reject_error.message);
+    throw new Error("无有效房源图片，已拒绝该候选房源");
+  }
 
   const required = [
     ["parsed_title", candidate.parsed_title],

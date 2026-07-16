@@ -6,6 +6,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { CalendarDays, MapPin, Plus, SearchX } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { getListingHref } from "@/lib/listingUrl";
 
 export const metadata: Metadata = {
   title: "我的房源"
@@ -56,7 +57,7 @@ export default async function LandlordListingsPage() {
                   <span className="flex items-center gap-1"><CalendarDays className="h-4 w-4" /> {formatDate(listing.available_from)}</span>
                 </div>
               </div>
-              <Link href={`/rent/${listing.id}`} className="btn-secondary shrink-0">查看房源详情</Link>
+              <Link href={getListingHref(listing)} className="btn-secondary shrink-0">查看房源详情</Link>
             </article>
           ))}
         </div>

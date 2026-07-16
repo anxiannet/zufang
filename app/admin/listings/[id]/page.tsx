@@ -7,6 +7,7 @@ import {
 } from "@/actions/admin";
 import { facilities, facilityLabels } from "@/lib/types";
 import { getCurrentProfile } from "@/lib/auth";
+import { getListingHref } from "@/lib/listingUrl";
 
 const tenantTypes = [["student", "学生"], ["professional", "上班族"], ["couple", "情侣"], ["family", "家庭"], ["single", "单人"]];
 
@@ -40,7 +41,7 @@ export default async function AdminListingDetailPage({
         </div>
         <div className="flex flex-wrap gap-2">
           <Link href="/admin/listings" className="btn-secondary">返回列表</Link>
-          {listing.status === "published" ? <Link href={`/rent/${listing.id}`} className="btn-secondary">查看公开页</Link> : null}
+          {listing.status === "published" ? <Link href={getListingHref(listing)} className="btn-secondary">查看公开页</Link> : null}
         </div>
       </div>
 

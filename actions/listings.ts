@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { parseListingAvailability } from "@/lib/listingDates";
 import { cleanPublicListingDescription } from "@/lib/listingDescription";
+import { extract_candidate_images } from "@/lib/candidateImages";
 import { extractListingFacilities, removeExtractedFacilityText } from "@/lib/listingFacilities";
 import { parse_source_posted_at } from "@/lib/listingSourceDates";
 import { extractListingStructuredFacts } from "@/lib/listingStructuredFacts";
@@ -298,7 +299,7 @@ export async function getHomeListings() {
   }));
   const officialIds = officialListings.map((listing) => listing.id);
   const postalCodes = [...new Set(
-    [...officialListings, ...candidateListings]
+    [...officialListings, ...candidateListings.listings]
       .map((listing) => listing.postal_code)
       .filter(Boolean)
   )] as string[];
@@ -347,7 +348,7 @@ export async function getHomeListings() {
 
   return {
     officialListings: officialListings.map(hydrate),
-    candidateListings: candidateListings.map(hydrate)
+    candidateListings: candidateListings.listings.map(hydrate)
   };
 }
 
@@ -356,6 +357,8 @@ export async function searchListings(searchParams: Record<string, string | strin
   const adminSupabase = createAdminClient();
   const visibility_cutoff = get_listing_visibility_cutoff();
   const keyword = String(searchParams.q ?? "").trim();
+  const requestedPage = Math.max(1, Number.parseInt(String(searchParams.page ?? "1"), 10) || 1);
+  const pageSize = 18;
   const candidateNo = parseCandidateNo(keyword);
   const selectedFacilities = Array.isArray(searchParams.facility)
     ? searchParams.facility.map(String)
@@ -377,7 +380,7 @@ export async function searchListings(searchParams: Record<string, string | strin
 
   let query = supabase
     .from("listings")
-    .select("id,listing_no,title,rent_amount,room_type,postal_code,available_from,available_note,min_lease_months,cooking_policy,registration_allowed,landlord_staying,bathroom_shared_with_count,current_occupants_count,description,description_clean,updated_at")
+    .select("id,listing_no,title,rent_amount,room_type,postal_code,available_from,available_note,min_lease_months,cooking_policy,registration_allowed,landlord_staying,bathroom_shared_with_count,current_occupants_count,description,description_clean,updated_at", { count: "exact" })
     .eq("status", "published")
     .gte("updated_at", visibility_cutoff);
 
@@ -434,11 +437,11 @@ export async function searchListings(searchParams: Record<string, string | strin
   else if (sort === "available_soon") query = query.order("available_from", { ascending: true });
   else query = query.order("updated_at", { ascending: false });
 
-  const [{ data, error }, candidateListings] = await Promise.all([
-    query.limit(60),
+  const [{ data, error, count: officialCount }, candidateResult] = await Promise.all([
+    query.limit(500),
     selectedFacilities.length > 0
-      ? Promise.resolve([] as ListingCard[])
-      : searchCandidateListings(adminSupabase, searchParams, keyword, candidateNo, location, locationPostalCodes)
+      ? Promise.resolve({ listings: [] as ListingCard[], total: 0 })
+      : searchCandidateListings(adminSupabase, searchParams, keyword, candidateNo, location, locationPostalCodes, 500)
   ]);
   if (error) throw new Error(error.message);
 
@@ -447,10 +450,13 @@ export async function searchListings(searchParams: Record<string, string | strin
     card_source: "official" as const
   }));
 
-  const listings = [...officialListings, ...candidateListings];
+  const listings = [...officialListings, ...candidateResult.listings];
+  const total = (officialCount ?? officialListings.length) + candidateResult.total;
   const officialIds = officialListings.map((listing) => listing.id);
   const postalCodes = [...new Set(listings.map((listing) => listing.postal_code).filter(Boolean))] as string[];
-  if (listings.length === 0) return listings;
+  if (listings.length === 0) {
+    return { listings, total, page: 1, page_size: pageSize, total_pages: 0 };
+  }
 
   const [imagesResult, geocodingResult, commuteResult] = await Promise.all([
     officialIds.length > 0
@@ -495,12 +501,21 @@ export async function searchListings(searchParams: Record<string, string | strin
     };
   });
 
-  if (sort === "price_asc") return hydrated.sort((a, b) => a.rent_amount - b.rent_amount).slice(0, 60);
-  if (sort === "available_soon") return hydrated.sort(compareAvailableFrom).slice(0, 60);
-  if (sort === "ntu_commute") return hydrated.sort(compareNtuCommute).slice(0, 60);
-  return hydrated
-    .sort((a, b) => listing_display_timestamp(b) - listing_display_timestamp(a))
-    .slice(0, 60);
+  if (sort === "price_asc") hydrated.sort((a, b) => a.rent_amount - b.rent_amount);
+  else if (sort === "available_soon") hydrated.sort(compareAvailableFrom);
+  else if (sort === "ntu_commute") hydrated.sort(compareNtuCommute);
+  else hydrated.sort((a, b) => listing_display_timestamp(b) - listing_display_timestamp(a));
+
+  const totalPages = Math.ceil(total / pageSize);
+  const page = Math.min(requestedPage, totalPages);
+  const pageStart = (page - 1) * pageSize;
+  return {
+    listings: hydrated.slice(pageStart, pageStart + pageSize),
+    total,
+    page,
+    page_size: pageSize,
+    total_pages: totalPages
+  };
 }
 
 function compareAvailableFrom(left: ListingCard, right: ListingCard) {
@@ -540,7 +555,7 @@ async function searchCandidateListings(
   location: string,
   locationPostalCodes: string[],
   limit = 60
-): Promise<ListingCard[]> {
+): Promise<{ listings: ListingCard[]; total: number }> {
   let query = supabase
     .from("listing_import_candidates")
     .select("id,candidate_no,ingestion_listing_id,source,source_url,parsed_title,parsed_rent_amount,parsed_postal_code,parsed_area,parsed_mrt,parsed_room_type,parsed_available_from,parsed_available_note,parsed_min_lease_months,parsed_cooking_policy,parsed_registration_allowed,parsed_landlord_staying,parsed_bathroom_shared_with_count,parsed_current_occupants_count,parsed_description,parsed_description_clean,updated_at")
@@ -611,10 +626,11 @@ async function searchCandidateListings(
           ingestion?.raw_detail_html,
           ingestion?.scraped_at
         ),
-        listing_images: extractCandidateImages(
-          [ingestion?.raw_detail_html, ingestion?.list_raw_html],
-          pageUrl
-        )
+        listing_images: extract_candidate_images({
+          detail_html: ingestion?.raw_detail_html,
+          list_html: ingestion?.list_raw_html,
+          page_url: pageUrl
+        })
       };
     })(),
     id: `candidate-${candidate.id}`,
@@ -648,7 +664,10 @@ async function searchCandidateListings(
   if (sort === "price_asc") visible_candidates.sort((a, b) => a.rent_amount - b.rent_amount);
   else if (sort === "available_soon") visible_candidates.sort(compareAvailableFrom);
   else visible_candidates.sort((a, b) => listing_display_timestamp(b) - listing_display_timestamp(a));
-  return visible_candidates.slice(0, limit);
+  return {
+    listings: visible_candidates.slice(0, limit),
+    total: visible_candidates.length
+  };
 }
 
 function listing_display_timestamp(listing: ListingCard): number {
@@ -685,23 +704,32 @@ function parse_candidate_source_posted_at(
 }
 
 export async function getListingDetail(id: string) {
+  const candidateNo = parseCandidateNo(id);
+  if (candidateNo) {
+    return getCandidateListingDetailByNumber(candidateNo);
+  }
+
   if (id.startsWith("candidate-")) {
     return getCandidateListingDetail(id.slice("candidate-".length));
   }
 
   const supabase = await createClient();
   const adminSupabase = createAdminClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("listings")
-    .select("id,listing_no,owner_id,status,title,listing_type,room_type,rent_amount,deposit_amount,postal_code,available_from,available_note,min_lease_months,max_occupants,gender_preference,registration_allowed,landlord_staying,total_bedrooms,total_bathrooms,current_occupants_count,bathroom_shared_with_count,description,description_clean,source,contact_visibility,wechat,phone,is_owner_direct,is_agent,is_sublet,verification_status,utilities_policy,aircon_policy,cooking_policy,visitors_policy,smoking_policy,pets_policy,tenant_type_preference,updated_at")
-    .eq("id", id)
-    .single();
+    .select("id,listing_no,owner_id,status,title,listing_type,room_type,rent_amount,deposit_amount,postal_code,available_from,available_note,min_lease_months,max_occupants,gender_preference,registration_allowed,landlord_staying,total_bedrooms,total_bathrooms,current_occupants_count,bathroom_shared_with_count,description,description_clean,source,contact_visibility,wechat,phone,is_owner_direct,is_agent,is_sublet,verification_status,utilities_policy,aircon_policy,cooking_policy,visitors_policy,smoking_policy,pets_policy,tenant_type_preference,updated_at");
+  query = /^[0-9]{5}$/.test(id)
+    ? query.eq("listing_no", Number(id))
+    : query.eq("id", id);
+  const { data, error } = await query.maybeSingle();
 
-  if (error) return null;
+  if (error || !data) return null;
+
+  const listingId = data.id;
 
   const [images, facilitiesRows, nearbyRows, geocoding, commute] = await Promise.all([
-    supabase.from("listing_images").select("image_url,sort_order,caption").eq("listing_id", id).order("sort_order", { ascending: true }),
-    supabase.from("listing_facilities").select("facility_name,availability,note").eq("listing_id", id),
+    supabase.from("listing_images").select("image_url,sort_order,caption").eq("listing_id", listingId).order("sort_order", { ascending: true }),
+    supabase.from("listing_facilities").select("facility_name,availability,note").eq("listing_id", listingId),
     data.postal_code
       ? supabase.from("nearby_places_cache").select("place_type,name,distance_meters,walking_minutes").eq("postal_code", data.postal_code)
       : Promise.resolve({ data: [] }),
@@ -793,10 +821,11 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
       .maybeSingle()
   ]);
   const pageUrl = data.source_url || ingestion.data?.detail_url || ingestion.data?.listing_url;
-  const candidateImages = extractCandidateImages(
-    [ingestion.data?.raw_detail_html, ingestion.data?.list_raw_html],
-    pageUrl
-  );
+  const candidateImages = extract_candidate_images({
+    detail_html: ingestion.data?.raw_detail_html,
+    list_html: ingestion.data?.list_raw_html,
+    page_url: pageUrl
+  });
   const structuredFacts = extractListingStructuredFacts(data.parsed_description_clean ?? data.parsed_description);
   const fallbackAvailability = parseListingAvailability(data.parsed_description_clean ?? data.parsed_description);
   const baseDescriptionClean = cleanPublicListingDescription(data.parsed_description_clean ?? data.parsed_description, data.parsed_title);
@@ -856,6 +885,20 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
   };
 }
 
+async function getCandidateListingDetailByNumber(candidateNo: number): Promise<ListingDetail | null> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("listing_import_candidates")
+    .select("id")
+    .eq("candidate_no", candidateNo)
+    .in("import_status", ["parsed", "needs_review", "approved"])
+    .is("listing_id", null)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return getCandidateListingDetail(data.id);
+}
+
 function normalizeParsedFacilities(value: unknown, fallbackText: string | null | undefined): NonNullable<ListingDetail["listing_facilities"]> {
   const rows = Array.isArray(value) && value.length > 0 ? value : extractListingFacilities(fallbackText);
   return rows.flatMap((row) => {
@@ -872,56 +915,6 @@ function normalizeParsedFacilities(value: unknown, fallbackText: string | null |
   });
 }
 
-function extractCandidateImages(
-  htmlValues: Array<string | null | undefined>,
-  pageUrl: string | null | undefined
-) {
-  const urls = new Set<string>();
-
-  for (const html of htmlValues) {
-    if (!html) continue;
-    const $ = cheerio.load(html);
-
-    $("img").each((_, element) => {
-      const node = $(element);
-      const candidates = [
-        node.attr("data-src"),
-        node.attr("data-original"),
-        node.attr("data-original-src"),
-        node.attr("data-lazy-src"),
-        node.attr("data-lazyload"),
-        node.attr("data-url"),
-        node.attr("src"),
-        node.attr("srcset")?.split(",")[0]?.trim().split(/\s+/)[0]
-      ];
-
-      for (const value of candidates) {
-        const imageUrl = normalizeCandidateImageUrl(value, pageUrl);
-        if (imageUrl) urls.add(imageUrl);
-      }
-    });
-  }
-
-  return [...urls].slice(0, 6).map((image_url, sort_order) => ({
-    image_url,
-    sort_order,
-    caption: null
-  }));
-}
-
-function normalizeCandidateImageUrl(value: string | undefined, pageUrl: string | null | undefined) {
-  if (!value || value.startsWith("data:") || value.startsWith("blob:")) return null;
-
-  try {
-    const url = new URL(value, pageUrl || undefined);
-    if (!["http:", "https:"].includes(url.protocol)) return null;
-    if (/(?:logo|avatar|icon|emoji|loading|placeholder|qrcode|qr-code|sprite)/i.test(url.pathname)) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
 export async function findListingId(searchValue: string) {
   const value = searchValue.trim();
   const candidateNo = parseCandidateNo(value);
@@ -934,7 +927,7 @@ export async function findListingId(searchValue: string) {
       .in("import_status", ["parsed", "needs_review", "approved"])
       .is("listing_id", null)
       .maybeSingle();
-    return data?.id ? `candidate-${data.id}` : null;
+    return data?.id ? `C${String(candidateNo).padStart(4, "0")}` : null;
   }
 
   if (!/^[0-9]{5}$/.test(value) && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
@@ -942,9 +935,9 @@ export async function findListingId(searchValue: string) {
   }
 
   const supabase = await createClient();
-  const query = supabase.from("listings").select("id").eq("status", "published");
+  const query = supabase.from("listings").select("id,listing_no").eq("status", "published");
   const { data } = /^[0-9]{5}$/.test(value)
     ? await query.eq("listing_no", Number(value)).maybeSingle()
     : await query.eq("id", value).maybeSingle();
-  return data?.id ?? null;
+  return data?.listing_no ? String(data.listing_no).padStart(5, "0") : data?.id ?? null;
 }

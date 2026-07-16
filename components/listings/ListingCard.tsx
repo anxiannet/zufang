@@ -11,6 +11,7 @@ import {
 import type { ListingCard as ListingCardType } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
 import { ListingImage } from "@/components/listings/ListingImage";
+import { getListingHref } from "@/lib/listingUrl";
 
 const roomLabels: Record<string, string> = {
   common_room: "普通房",
@@ -21,10 +22,10 @@ const roomLabels: Record<string, string> = {
   studio: "Studio 公寓"
 };
 
-export function ListingCard({ listing }: { listing: ListingCardType }) {
+export function ListingCard({ listing, return_to }: { listing: ListingCardType; return_to?: string }) {
   const image = [...(listing.listing_images ?? [])].sort((a, b) => a.sort_order - b.sort_order)[0]?.image_url;
   const isCandidate = listing.card_source === "candidate";
-  const href = `/rent/${listing.id}`;
+  const href = getListingHref(listing, return_to);
   const visibleNo = isCandidate
     ? listing.candidate_no ? `C${String(listing.candidate_no).padStart(4, "0")}` : "待核验"
     : listing.listing_no ? String(listing.listing_no).padStart(5, "0") : "待编号";
@@ -67,10 +68,12 @@ export function ListingCard({ listing }: { listing: ListingCardType }) {
           <ArrowUpRight className="mt-1 h-5 w-5 shrink-0 text-slate-400 transition group-hover:text-brand" />
         </div>
 
-        <div className="mt-3 flex items-start gap-2 text-sm text-muted">
-          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
-          <span className="line-clamp-2">{address}</span>
-        </div>
+        {address ? (
+          <div className="mt-3 flex items-start gap-2 text-sm text-muted">
+            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+            <span className="line-clamp-2">{address}</span>
+          </div>
+        ) : null}
 
         <div className="mt-4 grid grid-cols-2 gap-2">
           <InfoItem icon={Home} label="房型" value={listing.room_type ? roomLabels[listing.room_type] ?? listing.room_type : "整套"} />
@@ -142,20 +145,28 @@ function formatAddress(listing: ListingCardType) {
   ].filter(Boolean);
   if (parts.length > 0) return parts.join(" · ");
   if (listing.postal_code) return `新加坡 ${listing.postal_code}`;
-  if (listing.mrt) return `${listing.mrt} MRT 附近（估算位置）`;
-  return "具体地点待补充";
+  return null;
 }
 
 function formatCommute(listing: ListingCardType) {
+  const distance_label = formatDistance(listing.ntu_commute?.ntu_straight_distance_km);
   if (listing.ntu_commute?.is_estimated && listing.ntu_commute.ntu_bus_minutes != null) {
-    return `MRT 估算约 ${listing.ntu_commute.ntu_bus_minutes} 分钟`;
+    return `约 ${listing.ntu_commute.ntu_bus_minutes} 分钟${distance_label}`;
   }
-  if (listing.ntu_commute?.ntu_bus_minutes != null) return `公交约 ${listing.ntu_commute.ntu_bus_minutes} 分钟`;
-  if (listing.ntu_commute?.ntu_drive_minutes != null) return `驾车约 ${listing.ntu_commute.ntu_drive_minutes} 分钟`;
+  if (listing.ntu_commute?.ntu_bus_minutes != null) {
+    return `公交 ${listing.ntu_commute.ntu_bus_minutes} 分钟${distance_label}`;
+  }
+  if (listing.ntu_commute?.ntu_drive_minutes != null) {
+    return `驾车 ${listing.ntu_commute.ntu_drive_minutes} 分钟${distance_label}`;
+  }
   if (listing.ntu_commute?.ntu_straight_distance_km != null) {
     return `直线约 ${listing.ntu_commute.ntu_straight_distance_km.toFixed(1).replace(/\.0$/, "")} km`;
   }
   return "正在补充";
+}
+
+function formatDistance(distance: number | null | undefined) {
+  return distance == null ? "" : ` · 直线 ${distance.toFixed(1).replace(/\.0$/, "")} km`;
 }
 
 function countLabel(value: number | null) {

@@ -35,7 +35,7 @@ const candidate = parseListingByRules({
   rawText: cleaned.rawText,
   cleanText: cleaned.cleanText
 });
-const decision = decideImportStatus(candidate);
+const decision = decideImportStatus(candidate, { valid_image_count: 1 });
 
 assert.equal(decision.import_status, "rejected");
 assert.ok(decision.parse_warnings.some((warning) => warning.includes("不适合 NTU 学生")));

@@ -6,8 +6,9 @@ import {
   setListingImportCandidateStatus
 } from "@/actions/listingImports";
 import { getCurrentProfile } from "@/lib/auth";
+import { Badge } from "@/components/ui/Badge";
 
-const statuses = ["needs_review", "parsed", "duplicate", "rejected", "imported", "failed"];
+const statuses = ["needs_review", "parsed", "duplicate", "rejected", "imported", "failed"] as const;
 
 function formatCandidateNo(value: number | null | undefined) {
   return value ? `#C${String(value).padStart(4, "0")}` : "#C----";
@@ -29,7 +30,7 @@ export default async function ListingImportsPage({
     return <AccessCard title="无权限访问" message="只有 admin 可以审核爬虫候选房源。" actionHref="/rent" actionText="返回找房" />;
   }
 
-  const { candidates, owners, status: safe_status } = await getListingImportCandidates(status);
+  const { candidates, owners, status: safe_status, status_counts } = await getListingImportCandidates(status);
 
   return (
     <main className="container-page space-y-5 py-8">
@@ -66,7 +67,14 @@ export default async function ListingImportsPage({
 
       <nav className="flex flex-wrap gap-2">
         {statuses.map((item) => (
-          <Link key={item} href={`/admin/listing-imports?status=${item}`} className={item === safe_status ? "btn-primary" : "btn-secondary"}>{item}</Link>
+          <Link
+            key={item}
+            href={`/admin/listing-imports?status=${item}`}
+            className={`${item === safe_status ? "btn-primary" : "btn-secondary"} inline-flex items-center gap-2`}
+          >
+            <span>{item}</span>
+            <span className="rounded-full bg-black/10 px-2 py-0.5 text-xs tabular-nums">{status_counts[item] ?? 0}</span>
+          </Link>
         ))}
       </nav>
 
@@ -75,7 +83,10 @@ export default async function ListingImportsPage({
           <article key={candidate.id} className="card p-4">
             <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
               <div>
-                <div className="mb-1 text-xs font-semibold text-brand">候选编号 {formatCandidateNo(candidate.candidate_no)}</div>
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-brand">候选编号 {formatCandidateNo(candidate.candidate_no)}</span>
+                  {candidate.import_status === "parsed" ? <Badge tone="success">已发布</Badge> : null}
+                </div>
                 <div className="font-semibold text-ink">{candidate.parsed_title ?? "无标题"}</div>
                 <div className="mt-1 text-sm text-muted">
                   ${candidate.parsed_rent_amount ?? "-"} · 邮编 {candidate.parsed_postal_code ?? "缺失"} ·

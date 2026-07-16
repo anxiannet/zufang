@@ -182,7 +182,7 @@ export async function enrichNtuCommuteCache(
   return summary;
 }
 
-async function getEligiblePostalCodes(supabase: SupabaseClient, postal_code?: string): Promise<string[]> {
+export async function getEligiblePostalCodes(supabase: SupabaseClient, postal_code?: string): Promise<string[]> {
   let published_query = supabase
     .from("listings")
     .select("postal_code")
@@ -267,17 +267,18 @@ function prepareCommute(
 
   const distance_band = classifyNtuDistance(ntu_straight_distance_km);
   const recent_success = cache?.status === "success" && is_recent && !coordinates_changed && !force;
+  const skipped_far = distance_band === "skipped_far" && !force;
   return {
     ...geocoding,
     cache,
     ntu_straight_distance_km,
     coordinates_changed,
     is_recent,
-    next_status: recent_success ? "success" : "pending",
+    next_status: recent_success ? "success" : skipped_far ? "skipped_far" : "pending",
     skip_reason: distance_band !== "high_priority"
       ? "low_priority_distance"
       : null,
-    should_call_onemap: !recent_success
+    should_call_onemap: !recent_success && !skipped_far
   };
 }
 

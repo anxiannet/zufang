@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { extract_candidate_images } from "../../lib/candidateImages";
 import { cleanListingText } from "./cleanListingText";
 import { decideImportStatus } from "./decideImportStatus";
 import {
@@ -50,7 +51,12 @@ export async function processCrawlerListings(
         listPrice: row.list_price,
         listContact: row.list_contact
       });
-      const decision = decideImportStatus(parsed);
+      const valid_images = extract_candidate_images({
+        detail_html: row.raw_detail_html,
+        list_html: row.list_raw_html,
+        page_url: row.detail_url ?? row.listing_url
+      });
+      const decision = decideImportStatus(parsed, { valid_image_count: valid_images.length });
       const final_parsed: ParsedListingCandidate = { ...parsed, parse_warnings: decision.parse_warnings };
 
       if (options.dryRun) {
@@ -62,6 +68,12 @@ export async function processCrawlerListings(
       const created = await createImportCandidate(supabase, row, final_parsed, decision.import_status);
       if (created.created) summary.created_candidates += 1;
       if (!created.candidate) continue;
+
+      if (decision.import_status === "rejected") {
+        countStatus(summary, decision.import_status);
+        results.push({ ingestion_listing_id: row.id, import_status: decision.import_status, candidate_id: created.candidate.id });
+        continue;
+      }
 
       const duplicate = await detectDuplicateCandidate(supabase, created.candidate);
       if (duplicate.duplicate) {

@@ -21,6 +21,7 @@ const locations = [
   { pattern: /\bAMK\b|Ang\s+Mo\s+Kio|宏茂桥/i, area: "Ang Mo Kio", mrt: "Ang Mo Kio" },
   { pattern: /Boon\s+Lay|文礼/i, area: "Boon Lay", mrt: "Boon Lay" },
   { pattern: /Pioneer|先驱/i, area: "Jurong West", mrt: "Pioneer" },
+  { pattern: /Chinese\s+Garden|裕华园/i, area: "Jurong East", mrt: "Chinese Garden" },
   { pattern: /Jurong\s+West|裕廊西/i, area: "Jurong West", mrt: null },
   { pattern: /Clementi|金文泰/i, area: "Clementi", mrt: "Clementi" },
   { pattern: /Cashew|凯秀/i, area: "Bukit Panjang", mrt: "Cashew" },
@@ -59,8 +60,8 @@ export function parseListingByRules(input: ParseInput): ParsedListingCandidate {
   if (!title || title.length < 4) warnings.push("标题缺失或过短");
   if (!postal_code) warnings.push("未找到邮编");
   if (listing_type !== "whole_unit" && !room_type) warnings.push("无法识别房型");
-  if (room_type === "partition_room") warnings.push("疑似隔间房，需要人工审核");
-  if (room_type === "maid_room") warnings.push("疑似佣人房，需要人工审核");
+  if (room_type === "partition_room") warnings.push("疑似隔间房，直接拒绝");
+  if (room_type === "maid_room") warnings.push("疑似佣人房，直接拒绝");
   if (listing_type === "bedspace") warnings.push("疑似床位，需要人工审核");
   if (registration === null) warnings.push("报地址信息缺失");
   if (landlord_staying === null) warnings.push("屋主是否同住信息缺失");
@@ -68,8 +69,8 @@ export function parseListingByRules(input: ParseInput): ParsedListingCandidate {
 
   const is_agent = /\b中介\b|\bagent\b|CEA\s*(?:reg|registration)?/i.test(text);
   const is_sublet = /转租|二房东|\bsublet\b/i.test(text);
-  if (is_agent) warnings.push("疑似中介");
-  if (is_sublet) warnings.push("疑似转租");
+  if (is_agent) warnings.push("疑似中介，直接拒绝");
+  if (is_sublet) warnings.push("疑似转租，直接拒绝");
 
   const candidate: ParsedListingCandidate = {
     parsed_title: title,

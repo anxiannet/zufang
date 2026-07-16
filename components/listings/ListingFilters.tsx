@@ -12,7 +12,7 @@ export function ListingFilters({ searchParams }: { searchParams: Record<string, 
     : searchParams.facility
       ? [String(searchParams.facility)]
       : [];
-  const activeCount = Object.entries(searchParams).filter(([key, val]) => key !== "sort" && val && (Array.isArray(val) ? val.length > 0 : true)).length;
+  const activeCount = Object.entries(searchParams).filter(([key, val]) => !["sort", "page"].includes(key) && val && (Array.isArray(val) ? val.length > 0 : true)).length;
   const [expanded, setExpanded] = useState(activeCount > 0);
 
   return (

@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import {
   deleteStaleListing,
   findAllCandidateListings,
+  findPublishedCandidateListings,
   findStaleListings,
   markRemovedFromSource,
   refreshStaleListingDetail
@@ -31,11 +32,31 @@ export function getDeletedSourceNotice(html: string): string | null {
   return null;
 }
 
-export async function maintainStaleListings(options: { allCandidates?: boolean } = {}): Promise<StaleListingMaintenanceSummary> {
+export function isSourceGoneHttpStatus(status: number): boolean {
+  return status === 404 || status === 410;
+}
+
+type StaleListingMaintenanceOptions = {
+  allCandidates?: boolean;
+  publishedCandidates?: boolean;
+};
+
+export async function maintainPublishedCandidateListings(): Promise<StaleListingMaintenanceSummary> {
+  return maintainStaleListings({ publishedCandidates: true });
+}
+
+export async function maintainStaleListings(options: StaleListingMaintenanceOptions = {}): Promise<StaleListingMaintenanceSummary> {
   const cutoff = new Date(Date.now() - config.staleListingRecheckDays * 24 * 60 * 60 * 1000);
-  const listings = options.allCandidates
-    ? await findAllCandidateListings()
-    : await findStaleListings(cutoff, config.staleListingRecheckLimit);
+  const listings = options.publishedCandidates
+    ? await findPublishedCandidateListings(config.staleListingRecheckLimit)
+    : options.allCandidates
+      ? await findAllCandidateListings()
+      : await findStaleListings(cutoff, config.staleListingRecheckLimit);
+  const scope = options.publishedCandidates
+    ? "published_candidates"
+    : options.allCandidates
+      ? "all_candidates"
+      : "stale_ingestion";
   const summary: StaleListingMaintenanceSummary = {
     checked: 0,
     refreshed: 0,
@@ -45,8 +66,8 @@ export async function maintainStaleListings(options: { allCandidates?: boolean }
   };
 
   logger.info("[STALE_LISTING_CHECK_STARTED]", {
-    scope: options.allCandidates ? "all_candidates" : "stale_ingestion",
-    cutoff: options.allCandidates ? null : cutoff.toISOString(),
+    scope,
+    cutoff: options.allCandidates || options.publishedCandidates ? null : cutoff.toISOString(),
     limit: options.allCandidates ? null : config.staleListingRecheckLimit,
     selected: listings.length
   });
@@ -84,7 +105,21 @@ export async function maintainStaleListings(options: { allCandidates?: boolean }
     } catch (error) {
       summary.checked += 1;
 
-      if (error instanceof HttpStatusError && (error.status === 404 || error.status === 410)) {
+      if (error instanceof HttpStatusError && isSourceGoneHttpStatus(error.status)) {
+        if (options.publishedCandidates) {
+          await deleteStaleListing(listing, `HTTP ${error.status}`);
+          summary.deleted += 1;
+          logger.info("[STALE_LISTING_DELETED]", {
+            scope,
+            source: listing.source,
+            source_id: listing.source_id,
+            detail_url: listing.detail_url,
+            reason: `HTTP ${error.status}`,
+            elapsed_ms: Date.now() - started
+          });
+          return;
+        }
+
         await markRemovedFromSource(listing.source, listing.source_id);
         summary.removed += 1;
         logger.info("[STALE_LISTING_REMOVED]", {
@@ -108,7 +143,7 @@ export async function maintainStaleListings(options: { allCandidates?: boolean }
     }
   }
 
-  if (options.allCandidates) {
+  if (options.allCandidates || options.publishedCandidates) {
     let nextIndex = 0;
     const workerCount = Math.min(config.detailConcurrency, listings.length);
     await Promise.all(

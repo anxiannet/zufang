@@ -3,11 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
+import { extract_candidate_images } from "@/lib/candidateImages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { importCandidateToListing } from "@/src/import/repository";
 import { processCrawlerListings } from "@/src/import/processCrawlerListings";
 
 const allowed_statuses = new Set(["pending", "parsed", "needs_review", "rejected", "imported", "failed", "duplicate"]);
+const counted_statuses = ["needs_review", "parsed", "duplicate", "rejected", "imported", "failed"] as const;
 const listing_types = new Set(["room", "whole_unit", "student_apartment", "bedspace"]);
 const room_types = new Set(["common_room", "master_room", "studio", "whole_unit", "partition_room", "maid_room"]);
 const utilities_policies = new Set(["included", "shared", "excluded", "capped"]);
@@ -20,7 +22,7 @@ export async function getListingImportCandidates(status = "needs_review") {
   await requireRole(["admin"]);
   const supabase = createAdminClient();
   const safe_status = allowed_statuses.has(status) ? status : "needs_review";
-  const [{ data: candidates, error }, { data: owners, error: owner_error }] = await Promise.all([
+  const [{ data: candidates, error }, { data: owners, error: owner_error }, count_results] = await Promise.all([
     supabase
       .from("listing_import_candidates")
       .select("id,candidate_no,source,source_id,source_url,parsed_title,parsed_rent_amount,parsed_postal_code,parsed_area,parsed_mrt,parsed_listing_type,parsed_room_type,parsed_phone,parsed_wechat,parse_confidence,parse_warnings,import_status,listing_id,created_at")
@@ -31,11 +33,23 @@ export async function getListingImportCandidates(status = "needs_review") {
       .from("users_profile")
       .select("id,display_name,role")
       .in("role", ["admin", "landlord", "agent"])
-      .order("display_name")
+      .order("display_name"),
+    Promise.all(counted_statuses.map(async (counted_status) => {
+      const { count, error: count_error } = await supabase
+        .from("listing_import_candidates")
+        .select("id", { count: "exact", head: true })
+        .eq("import_status", counted_status);
+      return { counted_status, count: count ?? 0, error: count_error };
+    }))
   ]);
   if (error) throw new Error(error.message);
   if (owner_error) throw new Error(owner_error.message);
-  return { candidates: candidates ?? [], owners: owners ?? [], status: safe_status };
+  const count_error = count_results.find((result) => result.error)?.error;
+  if (count_error) throw new Error(count_error.message);
+  const status_counts = Object.fromEntries(
+    count_results.map(({ counted_status, count }) => [counted_status, count])
+  ) as Record<(typeof counted_statuses)[number], number>;
+  return { candidates: candidates ?? [], owners: owners ?? [], status: safe_status, status_counts };
 }
 
 export async function getListingImportCandidateDetail(id: string) {
@@ -157,7 +171,7 @@ export async function setListingImportCandidateStatus(formData: FormData) {
   const now = new Date().toISOString();
   const { data: current, error: read_error } = await supabase
     .from("listing_import_candidates")
-    .select("import_status,parse_warnings,parsed_postal_code")
+    .select("import_status,parse_warnings,parsed_postal_code,ingestion_listing_id,source_url")
     .eq("id", id)
     .single();
   if (read_error || current.import_status === "imported") {
@@ -167,12 +181,36 @@ export async function setListingImportCandidateStatus(formData: FormData) {
     redirect("/admin/listing-imports?error=missing_postal_code");
   }
 
+  let effective_status = status;
+  let parse_warnings = current.parse_warnings ?? [];
+  if (status === "parsed") {
+    const { data: ingestion, error: ingestion_error } = await supabase
+      .from("ingestion_listings")
+      .select("listing_url,detail_url,list_raw_html,raw_detail_html")
+      .eq("id", current.ingestion_listing_id)
+      .maybeSingle();
+    if (ingestion_error) redirect(`/admin/listing-imports?error=${encodeURIComponent(ingestion_error.message)}`);
+
+    const valid_images = extract_candidate_images({
+      detail_html: ingestion?.raw_detail_html,
+      list_html: ingestion?.list_raw_html,
+      page_url: current.source_url ?? ingestion?.detail_url ?? ingestion?.listing_url
+    });
+    if (valid_images.length === 0) {
+      effective_status = "rejected";
+      parse_warnings = [...new Set([...parse_warnings, "无有效房源图片，直接拒绝"])];
+    }
+  }
+
   const update: Record<string, unknown> = {
-    import_status: status,
+    import_status: effective_status,
     reviewed_by: profile.id,
     reviewed_at: now,
     updated_at: now
   };
+  if (effective_status === "rejected") {
+    update.parse_warnings = parse_warnings;
+  }
   if (status === "duplicate") {
     update.parse_warnings = [...new Set([...(current.parse_warnings ?? []), "人工标记为重复房源"])] ;
   }

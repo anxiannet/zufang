@@ -132,6 +132,35 @@ export async function findAllCandidateListings(): Promise<StaleIngestionListing[
   return listings;
 }
 
+export async function findPublishedCandidateListings(limit: number): Promise<StaleIngestionListing[]> {
+  const params = new URLSearchParams({
+    select: "ingestion_listing_id",
+    import_status: "eq.parsed",
+    order: "updated_at.asc",
+    limit: String(limit)
+  });
+  const candidates = await supabaseRequest<Array<{ ingestion_listing_id: string | number }>>(
+    `listing_import_candidates?${params.toString()}`
+  );
+  const ingestionIds = candidates.map((candidate) => candidate.ingestion_listing_id);
+  if (ingestionIds.length === 0) return [];
+
+  const listingParams = new URLSearchParams({
+    select: "id,source,source_id,listing_url,detail_url,list_title,scraped_at",
+    id: `in.(${ingestionIds.map(String).join(",")})`,
+    detail_url: "not.is.null"
+  });
+  const rows = await supabaseRequest<Array<Omit<StaleIngestionListing, "detail_url"> & { detail_url: string | null }>>(
+    `${config.listingTableName}?${listingParams.toString()}`
+  );
+  const rowsById = new Map(rows.map((row) => [String(row.id), row]));
+
+  return ingestionIds.flatMap((id) => {
+    const row = rowsById.get(String(id));
+    return row?.detail_url ? [{ ...row, detail_url: row.detail_url }] : [];
+  });
+}
+
 export async function refreshStaleListingDetail(
   listing: StaleIngestionListing,
   html: string,
@@ -198,9 +227,33 @@ export async function deleteStaleListing(listing: StaleIngestionListing, reason:
   );
 }
 
-export async function hasExistingRawDetail(source: string, sourceId: string): Promise<boolean> {
+export async function hasExistingRawDetail(source: string, sourceId: string, currentListHtml?: string): Promise<boolean> {
   const existing = await findExistingListing(source, sourceId);
-  return Boolean(existing?.raw_detail_html);
+  if (!existing?.raw_detail_html) return false;
+  if (currentListHtml === undefined) return true;
+  return detailContainsCurrentListImages(currentListHtml, existing.raw_detail_html);
+}
+
+export function detailContainsCurrentListImages(listHtml: string, detailHtml: string): boolean {
+  const listImageIds = extractSourceImageIds(listHtml);
+  if (listImageIds.size === 0) return true;
+
+  const detailImageIds = extractSourceImageIds(detailHtml);
+  return [...listImageIds].every((imageId) => detailImageIds.has(imageId));
+}
+
+function extractSourceImageIds(html: string): Set<string> {
+  const ids = new Set<string>();
+  const patterns = [
+    /\/img\/app\.models\.Image\/(\d+)\//gi,
+    /\/images\/image\/\d+\/(\d+)\.[a-z0-9]+/gi
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) ids.add(match[1]);
+  }
+
+  return ids;
 }
 
 async function findExistingListing(source: string, sourceId: string): Promise<ExistingListingRow | null> {

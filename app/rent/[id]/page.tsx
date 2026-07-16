@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   Bath,
   BusFront,
@@ -23,6 +23,7 @@ import { ListingDetailHero } from "@/components/listings/ListingDetailHero";
 import { Badge } from "@/components/ui/Badge";
 import { getCurrentProfile } from "@/lib/auth";
 import { facilityLabels } from "@/lib/types";
+import { getListingHref, getListingPublicId } from "@/lib/listingUrl";
 
 const policyLabels: Record<string, string> = {
   included: "包含在租金内",
@@ -59,6 +60,10 @@ export default async function ListingDetailPage({
   const query = await searchParams;
   const listing = await getListingDetail(id);
   if (!listing) notFound();
+  const returnHref = safeRentReturnHref(query.return_to);
+  const publicId = getListingPublicId(listing);
+  if (id !== publicId) redirect(getListingHref(listing, returnHref));
+  const listingHref = getListingHref(listing, returnHref);
   const profile = await getCurrentProfile();
   const isCandidate = listing.detail_source === "candidate";
   const facilities = listing.listing_facilities ?? [];
@@ -73,7 +78,7 @@ export default async function ListingDetailPage({
 
   return (
     <div className="container-page py-6 sm:py-10">
-      <Link href="/rent" className="mb-5 inline-flex items-center gap-1 text-sm font-semibold text-muted transition hover:text-brand">
+      <Link href={returnHref} className="mb-5 inline-flex items-center gap-1 text-sm font-semibold text-muted transition hover:text-brand">
         <ChevronLeft className="h-4 w-4" /> 返回房源列表
       </Link>
 
@@ -201,6 +206,7 @@ export default async function ListingDetailPage({
               ) : profile ? (
                 <form action={createEnquiry} className="space-y-3">
                   <input type="hidden" name="listing_id" value={listing.id} />
+                  <input type="hidden" name="listing_path" value={listingHref} />
                   <textarea name="message" rows={4} required placeholder="你好，我是 NTU 学生，计划两人入住，希望预约看房……" />
                   <div className="grid grid-cols-2 gap-2">
                     <input type="date" name="move_in_date" aria-label="计划入住日期" />
@@ -212,7 +218,7 @@ export default async function ListingDetailPage({
               ) : (
                 <div className="rounded-xl border border-line bg-slate-50 p-4 text-sm leading-6 text-muted">
                   登录后可以发送咨询，并根据房源设置获取联系方式或租房群对接。
-                  <Link className="btn-primary mt-4 w-full" href={`/auth/login?next=/rent/${listing.id}&reason=enquiry`}>
+                  <Link className="btn-primary mt-4 w-full" href={`/auth/login?next=${listingHref}&reason=enquiry`}>
                     登录后咨询
                   </Link>
                 </div>
@@ -231,6 +237,20 @@ export default async function ListingDetailPage({
       </div>
     </div>
   );
+}
+
+function safeRentReturnHref(value: string | string[] | undefined) {
+  const raw = (Array.isArray(value) ? value[0] : value)?.trim();
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/rent";
+
+  try {
+    const url = new URL(raw, "https://weijie.local");
+    return url.origin === "https://weijie.local" && url.pathname === "/rent"
+      ? `${url.pathname}${url.search}`
+      : "/rent";
+  } catch {
+    return "/rent";
+  }
 }
 
 function Panel({
