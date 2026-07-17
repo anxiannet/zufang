@@ -48,8 +48,9 @@ export async function processCrawlerListings(
         title: cleaned.title,
         rawText: cleaned.rawText,
         cleanText: cleaned.cleanText,
-        listPrice: row.list_price,
-        listContact: row.list_contact
+        listPrice: cleaned.hasDetailContent ? null : row.list_price,
+        listContact: cleaned.hasDetailContent ? null : row.list_contact,
+        postal_code: cleaned.postal_code
       });
       const valid_images = extract_candidate_images({
         detail_html: row.raw_detail_html,

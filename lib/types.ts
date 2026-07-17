@@ -94,6 +94,15 @@ export type ListingCard = {
   listing_images?: { image_url: string; sort_order: number; caption: string | null }[];
   card_source?: "official" | "candidate";
   source_url?: string | null;
+  user_preference_stats?: {
+    counts: {
+      favorite: number;
+      contact_later: number;
+      rented: number;
+      disliked: number;
+    };
+    total_users: number;
+  };
 };
 
 export type ListingDetail = ListingCard & {

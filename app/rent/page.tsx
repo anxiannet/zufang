@@ -4,6 +4,7 @@ import { rejectHomepageListing } from "@/actions/admin";
 import { findListingId, searchListings } from "@/actions/listings";
 import { ConfirmSubmitButton } from "@/components/admin/ConfirmSubmitButton";
 import { ListingCard } from "@/components/ListingCard";
+import { ListingPreferenceVisibility } from "@/components/listings/ListingPreferenceVisibility";
 import { SearchFilters } from "@/components/SearchFilters";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { getCurrentProfile } from "@/lib/auth";
@@ -74,22 +75,24 @@ export default async function RentPage({
           <>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {listings.map((listing) => (
-                <div key={listing.id} className="flex min-w-0 flex-col gap-2">
-                  <ListingCard listing={listing} return_to={currentListHref} />
-                  {isAdmin ? (
-                    <form action={rejectHomepageListing} className="flex">
-                      <input type="hidden" name="listing_id" value={listing.id} />
-                      <input type="hidden" name="card_source" value={listing.card_source ?? "official"} />
-                      <ConfirmSubmitButton
-                        className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-100"
-                        confirmMessage={`确认拒绝房源「${listing.title}」？拒绝后将立即从首页移除。`}
-                        pendingText="正在拒绝..."
-                      >
-                        拒绝此房源
-                      </ConfirmSubmitButton>
-                    </form>
-                  ) : null}
-                </div>
+                <ListingPreferenceVisibility key={listing.id} listing={listing}>
+                  <div className="flex min-w-0 flex-col gap-2">
+                    <ListingCard listing={listing} return_to={currentListHref} />
+                    {isAdmin ? (
+                      <form action={rejectHomepageListing} className="flex">
+                        <input type="hidden" name="listing_id" value={listing.id} />
+                        <input type="hidden" name="card_source" value={listing.card_source ?? "official"} />
+                        <ConfirmSubmitButton
+                          className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 transition hover:border-red-300 hover:bg-red-100"
+                          confirmMessage={`确认拒绝房源「${listing.title}」？拒绝后将立即从首页移除。`}
+                          pendingText="正在拒绝..."
+                        >
+                          拒绝此房源
+                        </ConfirmSubmitButton>
+                      </form>
+                    ) : null}
+                  </div>
+                </ListingPreferenceVisibility>
               ))}
             </div>
             <Pagination

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { get_listing_preference_stats } from "@/lib/listingPreferenceStats";
 
 const listing_statuses = new Set(["draft", "pending_review", "published", "rejected", "rented"]);
 const listing_types = new Set(["room", "whole_unit", "student_apartment", "bedspace"]);
@@ -182,17 +183,24 @@ export async function getAdminListingDetail(listingId: string) {
   if (images.error) throw new Error(images.error.message);
   if (!listing.data) return null;
 
-  const { data: owner } = await supabase
-    .from("users_profile")
-    .select("id,display_name,role,phone,whatsapp,wechat")
-    .eq("id", listing.data.owner_id)
-    .maybeSingle();
+  const listing_key = listing.data.listing_no
+    ? String(listing.data.listing_no).padStart(5, "0")
+    : listing.data.id;
+  const [{ data: owner }, preference_stats] = await Promise.all([
+    supabase
+      .from("users_profile")
+      .select("id,display_name,role,phone,whatsapp,wechat")
+      .eq("id", listing.data.owner_id)
+      .maybeSingle(),
+    get_listing_preference_stats(listing_key)
+  ]);
 
   return {
     listing: listing.data,
     facilities: facilities.data ?? [],
     images: images.data ?? [],
-    owner: owner ?? null
+    owner: owner ?? null,
+    preference_stats
   };
 }
 

@@ -6,6 +6,7 @@ import {
 import { Badge } from "@/components/ui/Badge";
 import { getCurrentProfile } from "@/lib/auth";
 import { formatSingaporeMediumDateTime } from "@/lib/dateTime";
+import { ListingPreferenceStats } from "@/components/admin/ListingPreferenceStats";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -44,7 +45,7 @@ export default async function ListingImportCandidateDetailPage({ params, searchP
     return <AccessCard title="候选不存在" message="这条候选房源可能已被删除。" actionHref="/admin/listing-imports" actionText="返回候选列表" />;
   }
 
-  const { candidate, ingestion } = detail;
+  const { candidate, ingestion, preference_stats } = detail;
   const is_read_only = candidate.import_status === "imported";
   const candidate_label = candidate.candidate_no
     ? `C${String(candidate.candidate_no).padStart(4, "0")}`
@@ -134,6 +135,8 @@ export default async function ListingImportCandidateDetailPage({ params, searchP
         </form>
 
         <div className="space-y-4">
+          <ListingPreferenceStats stats={preference_stats} />
+
           <section className="card p-5">
             <h2 className="font-semibold text-ink">Candidate 信息</h2>
             <dl className="mt-3 space-y-3 text-sm">

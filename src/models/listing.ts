@@ -101,7 +101,7 @@ export type CrawlSummary = {
   stoppedReason?: string;
   targets?: CrawlTargetSummary[];
   staleListings?: StaleListingMaintenanceSummary;
-  publishedCandidates?: StaleListingMaintenanceSummary;
+  displayed_candidates?: StaleListingMaintenanceSummary;
 };
 
 export type StaleListingMaintenanceSummary = {

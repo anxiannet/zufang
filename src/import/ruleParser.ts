@@ -15,6 +15,7 @@ type ParseInput = {
   cleanText: string;
   listPrice?: number | null;
   listContact?: string | null;
+  postal_code?: string | null;
 };
 
 const locations = [
@@ -41,7 +42,7 @@ export function parseListingByRules(input: ParseInput): ParsedListingCandidate {
   const structured_facts = extractListingStructuredFacts(input.cleanText);
   const rent_amount = parseRent(input.listPrice, text, warnings);
   const phone = extractPhone(`${input.listContact ?? ""}\n${text}`);
-  const postal_code = parsePostalCode(text, phone);
+  const postal_code = parsePostalCode(text, phone) ?? input.postal_code ?? null;
   const location = locations.find((item) => item.pattern.test(text));
   const room_type = structured_facts.room_type ?? parseRoomType(input.title ?? "", text);
   const listing_type = parseListingType(text);

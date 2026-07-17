@@ -1,6 +1,8 @@
 import { ListListing, RawDetailListing, StaleIngestionListing } from "../models/listing";
 import { config } from "../utils/config";
 import { supabaseRequest } from "./pool";
+import { parse_candidate_source_posted_at } from "../../lib/listingSourceDates";
+import { is_listing_date_visible, LISTING_SEARCH_QUERY_LIMIT } from "../../lib/listingVisibility";
 
 type ExistingListingRow = {
   id: string | number;
@@ -132,32 +134,70 @@ export async function findAllCandidateListings(): Promise<StaleIngestionListing[
   return listings;
 }
 
-export async function findPublishedCandidateListings(limit: number): Promise<StaleIngestionListing[]> {
+type DisplayedCandidateRow = {
+  ingestion_listing_id: string | number;
+  parsed_postal_code: string | null;
+  parsed_mrt: string | null;
+  updated_at: string;
+};
+
+type DisplayedCandidateIngestionRow = StaleIngestionListing & {
+  list_raw_text: string | null;
+  raw_detail_html: string | null;
+};
+
+export function is_displayed_candidate_listing(
+  candidate: DisplayedCandidateRow,
+  ingestion: DisplayedCandidateIngestionRow,
+  reference_date = new Date()
+): boolean {
+  if (!candidate.parsed_postal_code && !candidate.parsed_mrt) return false;
+  const source_posted_at = parse_candidate_source_posted_at(
+    ingestion.list_raw_text,
+    ingestion.raw_detail_html,
+    ingestion.scraped_at
+  );
+  return is_listing_date_visible(source_posted_at ?? candidate.updated_at, reference_date);
+}
+
+export async function find_displayed_candidate_listings(): Promise<StaleIngestionListing[]> {
   const params = new URLSearchParams({
-    select: "ingestion_listing_id",
-    import_status: "eq.parsed",
-    order: "updated_at.asc",
-    limit: String(limit)
+    select: "ingestion_listing_id,parsed_postal_code,parsed_mrt,updated_at",
+    import_status: "in.(parsed,needs_review,approved)",
+    listing_id: "is.null",
+    parsed_title: "not.is.null",
+    parsed_rent_amount: "not.is.null",
+    order: "updated_at.desc",
+    limit: String(LISTING_SEARCH_QUERY_LIMIT)
   });
-  const candidates = await supabaseRequest<Array<{ ingestion_listing_id: string | number }>>(
+  const candidates = await supabaseRequest<DisplayedCandidateRow[]>(
     `listing_import_candidates?${params.toString()}`
   );
-  const ingestionIds = candidates.map((candidate) => candidate.ingestion_listing_id);
-  if (ingestionIds.length === 0) return [];
 
-  const listingParams = new URLSearchParams({
-    select: "id,source,source_id,listing_url,detail_url,list_title,scraped_at",
-    id: `in.(${ingestionIds.map(String).join(",")})`,
-    detail_url: "not.is.null"
-  });
-  const rows = await supabaseRequest<Array<Omit<StaleIngestionListing, "detail_url"> & { detail_url: string | null }>>(
-    `${config.listingTableName}?${listingParams.toString()}`
-  );
-  const rowsById = new Map(rows.map((row) => [String(row.id), row]));
+  const ingestion_ids = [...new Set(candidates.map((candidate) => candidate.ingestion_listing_id))];
+  if (ingestion_ids.length === 0) return [];
 
-  return ingestionIds.flatMap((id) => {
-    const row = rowsById.get(String(id));
-    return row?.detail_url ? [{ ...row, detail_url: row.detail_url }] : [];
+  const rows: DisplayedCandidateIngestionRow[] = [];
+  const chunk_size = 100;
+  for (let index = 0; index < ingestion_ids.length; index += chunk_size) {
+    const chunk = ingestion_ids.slice(index, index + chunk_size);
+    const params = new URLSearchParams({
+      select: "id,source,source_id,listing_url,detail_url,list_title,list_raw_text,raw_detail_html,scraped_at",
+      id: `in.(${chunk.map(String).join(",")})`,
+      detail_url: "not.is.null"
+    });
+    const chunk_rows = await supabaseRequest<Array<Omit<DisplayedCandidateIngestionRow, "detail_url"> & { detail_url: string | null }>>(
+      `${config.listingTableName}?${params.toString()}`
+    );
+    rows.push(...chunk_rows.filter((row): row is DisplayedCandidateIngestionRow => Boolean(row.detail_url)));
+  }
+
+  const candidates_by_ingestion_id = new Map(candidates.map((candidate) => [String(candidate.ingestion_listing_id), candidate]));
+  const rows_by_id = new Map(rows.map((row) => [String(row.id), row]));
+  return ingestion_ids.flatMap((id) => {
+    const candidate = candidates_by_ingestion_id.get(String(id));
+    const row = rows_by_id.get(String(id));
+    return candidate && row && is_displayed_candidate_listing(candidate, row) ? [row] : [];
   });
 }
 

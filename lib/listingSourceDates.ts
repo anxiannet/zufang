@@ -1,3 +1,5 @@
+import * as cheerio from "cheerio";
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function parse_source_posted_at(
@@ -16,4 +18,13 @@ export function parse_source_posted_at(
   if (/昨天/.test(source_text)) return new Date(observed_date.getTime() - DAY_MS).toISOString();
   if (/(?:今天|刚刚|\d+\s*(?:分钟|小时)前)/.test(source_text)) return observed_date.toISOString();
   return null;
+}
+
+export function parse_candidate_source_posted_at(
+  list_text: string | null | undefined,
+  detail_html: string | null | undefined,
+  observed_at: string | null | undefined
+): string | null {
+  const detail_text = detail_html ? cheerio.load(detail_html).root().text() : null;
+  return parse_source_posted_at([detail_text, list_text].filter(Boolean).join(" "), observed_at);
 }

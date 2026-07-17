@@ -10,6 +10,7 @@ import clsx from "clsx";
 const navigation = [
   { href: "/", label: "首页" },
   { href: "/rent", label: "房源" },
+  { href: "/my-listings", label: "我的列表" },
   { href: "/landlord/listings/new", label: "发布房源" },
   { href: "/about", label: "关于我们" }
 ];

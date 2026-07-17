@@ -21,6 +21,101 @@ const emptyCleaned = cleanListingText({});
 assert.equal(emptyCleaned.title, null);
 assert.equal(emptyCleaned.rawText, "");
 assert.equal(emptyCleaned.cleanText, "");
+assert.equal(emptyCleaned.hasDetailContent, false);
+assert.equal(emptyCleaned.postal_code, null);
+
+const mismatchedSource = cleanListingText({
+  list_title: "Pioneer Blk 978 普通房出租",
+  list_raw_text: "Pioneer Blk 978 普通房出租 $800",
+  raw_detail_html: `
+    <html>
+      <head><title>Eunos Blk 19 普通房出租 - 狮城BBS</title></head>
+      <body><main><h1>Eunos Blk 19 普通房出租</h1><p>友诺士普通房，价格 $700，电话 91446215。</p></main></body>
+    </html>
+  `
+});
+assert.equal(mismatchedSource.hasDetailContent, true);
+assert.equal(mismatchedSource.title, "Eunos Blk 19 普通房出租");
+assert.ok(mismatchedSource.cleanText.includes("$700"));
+assert.ok(!mismatchedSource.cleanText.includes("Pioneer"));
+assert.ok(!mismatchedSource.cleanText.includes("$800"));
+
+const mapPostalSource = cleanListingText({
+  raw_detail_html: `
+    <html>
+      <head><title>文礼普通房出租 - 狮城BBS</title></head>
+      <body>
+        <main><p>文礼普通房出租，电话 98882658，月租 $1000。</p></main>
+        <iframe src="https://www.google.com/maps/embed/v1/place?key=test&amp;q=Singapore+640695"></iframe>
+      </body>
+    </html>
+  `
+});
+assert.equal(mapPostalSource.postal_code, "640695");
+assert.ok(!mapPostalSource.cleanText.includes("640695"));
+
+const mapPostalCandidate = parseListingByRules({
+  ingestionId: 408,
+  source: "shichengbbs.com",
+  sourceId: "3027665",
+  sourceUrl: "https://www.shichengbbs.com/3027665",
+  title: mapPostalSource.title,
+  rawText: mapPostalSource.rawText,
+  cleanText: mapPostalSource.cleanText,
+  postal_code: mapPostalSource.postal_code
+});
+assert.equal(mapPostalCandidate.parsed_postal_code, "640695");
+
+const chineseBlockCorrectsMapPostal = cleanListingText({
+  raw_detail_html: `
+    <html>
+      <head><title>老文礼附近大牌186有单人间出租 - 狮城BBS</title></head>
+      <body>
+        <main><p>老文礼附近大牌186有单人间出租。</p></main>
+        <iframe src="https://www.google.com/maps/embed/v1/place?key=test&amp;q=Singapore+640184"></iframe>
+      </body>
+    </html>
+  `
+});
+assert.equal(chineseBlockCorrectsMapPostal.postal_code, "640186");
+
+const englishBlockCorrectsMapPostal = cleanListingText({
+  raw_detail_html: `
+    <html>
+      <head><title>普通房出租 - 狮城BBS</title></head>
+      <body>
+        <main><p>Jurong West St 61 Blk625 普通房出租。</p></main>
+        <iframe src="https://www.google.com/maps/embed/v1/place?key=test&amp;q=Singapore+640325"></iframe>
+      </body>
+    </html>
+  `
+});
+assert.equal(englishBlockCorrectsMapPostal.postal_code, "640625");
+
+const ambiguousBlocksKeepMapPostal = cleanListingText({
+  raw_detail_html: `
+    <html>
+      <head><title>裕廊西两个房间出租 - 狮城BBS</title></head>
+      <body>
+        <main><p>Blk 671A 或 Blk 691 均有房间。</p></main>
+        <iframe src="https://www.google.com/maps/embed/v1/place?key=test&amp;q=Singapore+640689"></iframe>
+      </body>
+    </html>
+  `
+});
+assert.equal(ambiguousBlocksKeepMapPostal.postal_code, "640689");
+
+const explicitPostalOverridesMapPostal = parseListingByRules({
+  ingestionId: 1,
+  source: "shichengbbs.com",
+  sourceId: "explicit-postal",
+  sourceUrl: "https://example.com/explicit-postal",
+  title: "裕廊西普通房出租",
+  rawText: "裕廊西普通房出租，邮编 640851，电话 81234567，$900。",
+  cleanText: "裕廊西普通房出租，邮编 640851，电话 81234567，$900。",
+  postal_code: "640325"
+});
+assert.equal(explicitPostalOverridesMapPostal.parsed_postal_code, "640851");
 
 const sample1 = parse(
   "环境安静采光良好，适合学生长期居住。\n近地铁空调房可煮带家具马上入住限女生组屋\n86936399 $1,000",

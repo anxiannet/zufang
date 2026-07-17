@@ -1,6 +1,5 @@
 "use server";
 
-import * as cheerio from "cheerio";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
@@ -10,9 +9,11 @@ import { parseListingAvailability } from "@/lib/listingDates";
 import { cleanPublicListingDescription } from "@/lib/listingDescription";
 import { extract_candidate_images } from "@/lib/candidateImages";
 import { extractListingFacilities, removeExtractedFacilityText } from "@/lib/listingFacilities";
-import { parse_source_posted_at } from "@/lib/listingSourceDates";
+import { parse_candidate_source_posted_at } from "@/lib/listingSourceDates";
+import { get_listing_preference_stats, get_listing_preference_stats_map } from "@/lib/listingPreferenceStats";
 import { extractListingStructuredFacts } from "@/lib/listingStructuredFacts";
-import { get_listing_visibility_cutoff, is_listing_date_visible } from "@/lib/listingVisibility";
+import { getListingPublicId } from "@/lib/listingUrl";
+import { get_listing_visibility_cutoff, is_listing_date_visible, LISTING_SEARCH_QUERY_LIMIT } from "@/lib/listingVisibility";
 import { build_mrt_commute_estimate } from "@/lib/mrtCommuteEstimates";
 import { build_ntu_commute_fallback } from "@/lib/ntuDistance";
 import { facilities, type FacilityAvailability, type ListingCard, type ListingDetail } from "@/lib/types";
@@ -304,7 +305,7 @@ export async function getHomeListings() {
       .filter(Boolean)
   )] as string[];
 
-  const [imagesResult, geocodingResult, commuteResult] = await Promise.all([
+  const [imagesResult, geocodingResult, commuteResult, preferenceStatsByKey] = await Promise.all([
     officialIds.length > 0
       ? supabase
         .from("listing_images")
@@ -324,7 +325,10 @@ export async function getHomeListings() {
         .from("listing_commute_cache")
         .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,ntu_straight_distance_km,status,skip_reason,computed_at")
         .in("postal_code", postalCodes)
-      : Promise.resolve({ data: [] as NonNullable<ListingCard["ntu_commute"]>[] })
+      : Promise.resolve({ data: [] as NonNullable<ListingCard["ntu_commute"]>[] }),
+    get_listing_preference_stats_map(
+      [...officialListings, ...candidateListings.listings].map(getListingPublicId)
+    )
   ]);
 
   const imagesByListing = new Map<string, { image_url: string; sort_order: number; caption: string | null }[]>();
@@ -342,7 +346,8 @@ export async function getHomeListings() {
       ...listing,
       geocoding,
       ntu_commute: build_listing_commute(listing.postal_code, listing.mrt, geocoding, commute),
-      listing_images: listing.card_source === "official" ? imagesByListing.get(listing.id) ?? [] : listing.listing_images ?? []
+      listing_images: listing.card_source === "official" ? imagesByListing.get(listing.id) ?? [] : listing.listing_images ?? [],
+      user_preference_stats: preferenceStatsByKey.get(getListingPublicId(listing))
     };
   };
 
@@ -438,7 +443,7 @@ export async function searchListings(searchParams: Record<string, string | strin
   else query = query.order("updated_at", { ascending: false });
 
   const [{ data, error, count: officialCount }, candidateResult] = await Promise.all([
-    query.limit(500),
+    query.limit(LISTING_SEARCH_QUERY_LIMIT),
     selectedFacilities.length > 0
       ? Promise.resolve({ listings: [] as ListingCard[], total: 0 })
       : searchCandidateListings(adminSupabase, searchParams, keyword, candidateNo, location, locationPostalCodes, 500)
@@ -509,8 +514,15 @@ export async function searchListings(searchParams: Record<string, string | strin
   const totalPages = Math.ceil(total / pageSize);
   const page = Math.min(requestedPage, totalPages);
   const pageStart = (page - 1) * pageSize;
+  const page_listings = hydrated.slice(pageStart, pageStart + pageSize);
+  const preference_stats_by_key = await get_listing_preference_stats_map(
+    page_listings.map(getListingPublicId)
+  );
   return {
-    listings: hydrated.slice(pageStart, pageStart + pageSize),
+    listings: page_listings.map((listing) => ({
+      ...listing,
+      user_preference_stats: preference_stats_by_key.get(getListingPublicId(listing))
+    })),
     total,
     page,
     page_size: pageSize,
@@ -602,7 +614,7 @@ async function searchCandidateListings(
   else if (sort === "available_soon") query = query.order("parsed_available_from", { ascending: true });
   else query = query.order("updated_at", { ascending: false });
 
-  const { data, error } = await query.limit(500);
+  const { data, error } = await query.limit(LISTING_SEARCH_QUERY_LIMIT);
   if (error) throw new Error(error.message);
 
   const ingestionIds = (data ?? []).map((candidate) => candidate.ingestion_listing_id);
@@ -694,15 +706,6 @@ function build_listing_commute(
   return postal_commute ?? mrt_estimate;
 }
 
-function parse_candidate_source_posted_at(
-  list_text: string | null | undefined,
-  detail_html: string | null | undefined,
-  observed_at: string | null | undefined
-): string | null {
-  const detail_text = detail_html ? cheerio.load(detail_html).root().text() : null;
-  return parse_source_posted_at([detail_text, list_text].filter(Boolean).join(" "), observed_at);
-}
-
 export async function getListingDetail(id: string) {
   const candidateNo = parseCandidateNo(id);
   if (candidateNo) {
@@ -727,7 +730,8 @@ export async function getListingDetail(id: string) {
 
   const listingId = data.id;
 
-  const [images, facilitiesRows, nearbyRows, geocoding, commute] = await Promise.all([
+  const listing_key = data.listing_no ? String(data.listing_no).padStart(5, "0") : data.id;
+  const [images, facilitiesRows, nearbyRows, geocoding, commute, user_preference_stats] = await Promise.all([
     supabase.from("listing_images").select("image_url,sort_order,caption").eq("listing_id", listingId).order("sort_order", { ascending: true }),
     supabase.from("listing_facilities").select("facility_name,availability,note").eq("listing_id", listingId),
     data.postal_code
@@ -743,7 +747,8 @@ export async function getListingDetail(id: string) {
       .from("listing_commute_cache")
       .select("postal_code,ntu_bus_minutes,ntu_drive_minutes,ntu_straight_distance_km,status,skip_reason,computed_at")
       .eq("postal_code", data.postal_code)
-      .maybeSingle()
+      .maybeSingle(),
+    get_listing_preference_stats(listing_key)
   ]);
 
   return {
@@ -754,6 +759,7 @@ export async function getListingDetail(id: string) {
     listing_images: images.data ?? [],
     listing_facilities: facilitiesRows.data ?? [],
     nearby_places_cache: nearbyRows.data ?? [],
+    user_preference_stats,
     detail_source: "official"
   } as ListingDetail;
 }
@@ -792,7 +798,10 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
   const postalCode = data.parsed_postal_code;
   if (!postalCode && !data.parsed_mrt) return null;
 
-  const [geocoding, commute, nearbyRows, ingestion] = await Promise.all([
+  const listing_key = data.candidate_no
+    ? `C${String(data.candidate_no).padStart(4, "0")}`
+    : `candidate-${data.id}`;
+  const [geocoding, commute, nearbyRows, ingestion, user_preference_stats] = await Promise.all([
     postalCode
       ? supabase
         .from("geocoding_cache")
@@ -818,7 +827,8 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
       .from("ingestion_listings")
       .select("listing_url,detail_url,list_raw_html,raw_detail_html")
       .eq("id", data.ingestion_listing_id)
-      .maybeSingle()
+      .maybeSingle(),
+    get_listing_preference_stats(listing_key)
   ]);
   const pageUrl = data.source_url || ingestion.data?.detail_url || ingestion.data?.listing_url;
   const candidateImages = extract_candidate_images({
@@ -881,6 +891,7 @@ async function getCandidateListingDetail(candidateId: string): Promise<ListingDe
     total_bathrooms: data.parsed_total_bathrooms ?? structuredFacts.total_bathrooms,
     listing_facilities: parsedFacilities,
     nearby_places_cache: nearbyRows.data ?? [],
+    user_preference_stats,
     detail_source: "candidate"
   };
 }

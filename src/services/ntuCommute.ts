@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { haversineDistanceKm, NTU_CENTER } from "../../lib/ntuDistance";
 import { getOneMapAccessToken } from "./oneMapToken";
+import { sleep } from "../utils/sleep";
 
 export { haversineDistanceKm, NTU_CENTER } from "../../lib/ntuDistance";
 
@@ -11,6 +12,7 @@ const HIGH_PRIORITY_DISTANCE_KM = 8;
 const MAX_DISTANCE_KM = 12;
 const MAX_BATCH_SIZE = 50;
 const COORDINATE_EPSILON = 0.000001;
+const MAX_ONEMAP_ATTEMPTS = 4;
 
 type GeocodingRow = {
   postal_code: string;
@@ -416,13 +418,24 @@ function oneMapHeaders(token: string): HeadersInit {
 }
 
 async function fetchWithTimeout(input: URL, init: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
+  for (let attempt = 0; attempt < MAX_ONEMAP_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    try {
+      const response = await fetch(input, { ...init, signal: controller.signal });
+      if (response.status !== 429 || attempt === MAX_ONEMAP_ATTEMPTS - 1) return response;
+      await response.body?.cancel();
+      const retry_after_seconds = Number(response.headers.get("retry-after"));
+      const delay_ms = Number.isFinite(retry_after_seconds) && retry_after_seconds > 0
+        ? retry_after_seconds * 1000
+        : 1000 * 2 ** attempt;
+      await sleep(delay_ms);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+
+  throw new Error("OneMap request retry limit reached");
 }
 
 function routeDate(): string {

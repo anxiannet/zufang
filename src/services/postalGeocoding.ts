@@ -1,9 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getEligiblePostalCodes } from "./ntuCommute";
+import { sleep } from "../utils/sleep";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
 const MAX_BATCH_SIZE = 50;
+const MIN_REQUEST_INTERVAL_MS = 500;
+const MAX_ONEMAP_ATTEMPTS = 4;
 
 type GeocodingCacheRow = {
   postal_code: string;
@@ -51,7 +54,8 @@ export async function enrichPostalGeocodingCache(
     results: []
   };
 
-  for (const postal_code of selected) {
+  for (const [index, postal_code] of selected.entries()) {
+    if (index > 0) await sleep(MIN_REQUEST_INTERVAL_MS);
     const now = new Date().toISOString();
     const { error: pending_error } = await supabase.from("geocoding_cache").upsert({
       postal_code,
@@ -128,13 +132,13 @@ async function geocodePostalCode(postal_code: string) {
   endpoint.searchParams.set("getAddrDetails", "Y");
   endpoint.searchParams.set("pageNum", "1");
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-  try {
-    const response = await fetch(endpoint, {
-      headers: { Accept: "application/json", "User-Agent": "ntu-rental-database/1.0" },
-      signal: controller.signal
-    });
+  for (let attempt = 0; attempt < MAX_ONEMAP_ATTEMPTS; attempt += 1) {
+    const response = await fetchGeocoding(endpoint);
+    if (response.status === 429 && attempt < MAX_ONEMAP_ATTEMPTS - 1) {
+      await response.body?.cancel();
+      await sleep(retryDelayMs(response, attempt));
+      continue;
+    }
     if (!response.ok) throw new Error(`OneMap geocoding HTTP ${response.status}`);
     const payload = await response.json();
     const raw_result = Array.isArray(payload?.results)
@@ -148,9 +152,30 @@ async function geocodePostalCode(postal_code: string) {
       throw new Error("OneMap geocoding result missing coordinates");
     }
     return { latitude, longitude, raw_result: raw_result as OneMapResult };
+  }
+
+  return null;
+}
+
+async function fetchGeocoding(endpoint: URL): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    return await fetch(endpoint, {
+      headers: { Accept: "application/json", "User-Agent": "ntu-rental-database/1.0" },
+      signal: controller.signal
+    });
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function retryDelayMs(response: Response, attempt: number): number {
+  const retry_after_seconds = Number(response.headers.get("retry-after"));
+  if (Number.isFinite(retry_after_seconds) && retry_after_seconds > 0) {
+    return retry_after_seconds * 1000;
+  }
+  return 1000 * 2 ** attempt;
 }
 
 async function updateFailure(

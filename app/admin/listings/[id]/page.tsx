@@ -8,6 +8,7 @@ import {
 import { facilities, facilityLabels } from "@/lib/types";
 import { getCurrentProfile } from "@/lib/auth";
 import { getListingHref } from "@/lib/listingUrl";
+import { ListingPreferenceStats } from "@/components/admin/ListingPreferenceStats";
 
 const tenantTypes = [["student", "学生"], ["professional", "上班族"], ["couple", "情侣"], ["family", "家庭"], ["single", "单人"]];
 
@@ -26,7 +27,7 @@ export default async function AdminListingDetailPage({
   const query = await searchParams;
   const detail = await getAdminListingDetail(id);
   if (!detail) notFound();
-  const { listing, owner, images } = detail;
+  const { listing, owner, images, preference_stats } = detail;
   const facilityByName = new Map(detail.facilities.map((item) => [item.facility_name, item]));
 
   return (
@@ -48,6 +49,8 @@ export default async function AdminListingDetailPage({
       {query.saved === "1" ? <Notice text="房源详情已保存。" /> : null}
       {typeof query.status_updated === "string" ? <Notice text={`房源状态已更新为 ${query.status_updated}。`} /> : null}
       {typeof query.error === "string" ? <ErrorNotice text={query.error} /> : null}
+
+      <ListingPreferenceStats stats={preference_stats} />
 
       <section className="card p-4">
         <h2 className="font-semibold text-ink">状态管理</h2>

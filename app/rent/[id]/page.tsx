@@ -20,6 +20,8 @@ import {
 import { createEnquiry } from "@/actions/enquiries";
 import { getListingDetail } from "@/actions/listings";
 import { ListingDetailHero } from "@/components/listings/ListingDetailHero";
+import { ListingPreferenceActions } from "@/components/listings/ListingPreferenceActions";
+import { PublicListingPreferenceStats } from "@/components/listings/PublicListingPreferenceStats";
 import { Badge } from "@/components/ui/Badge";
 import { getCurrentProfile } from "@/lib/auth";
 import { facilityLabels } from "@/lib/types";
@@ -83,6 +85,8 @@ export default async function ListingDetailPage({
       </Link>
 
       <ListingDetailHero listing={listing} />
+      <ListingPreferenceActions listing={listing} />
+      <PublicListingPreferenceStats listing={listing} />
 
       <div className="mt-7 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">

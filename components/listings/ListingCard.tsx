@@ -11,6 +11,8 @@ import {
 import type { ListingCard as ListingCardType } from "@/lib/types";
 import { Badge } from "@/components/ui/Badge";
 import { ListingImage } from "@/components/listings/ListingImage";
+import { ListingPreferenceActions } from "@/components/listings/ListingPreferenceActions";
+import { PublicListingPreferenceStats } from "@/components/listings/PublicListingPreferenceStats";
 import { getListingHref } from "@/lib/listingUrl";
 
 const roomLabels: Record<string, string> = {
@@ -53,6 +55,9 @@ export function ListingCard({ listing, return_to }: { listing: ListingCardType; 
         </div>
         <div className="absolute bottom-3 right-3 rounded-full bg-slate-950/75 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur">
           发布 {formatUpdatedDate(listing.source_posted_at ?? listing.updated_at)}
+        </div>
+        <div className="absolute bottom-3 left-3">
+          <PublicListingPreferenceStats listing={listing} compact />
         </div>
       </div>
 
@@ -103,8 +108,12 @@ export function ListingCard({ listing, return_to }: { listing: ListingCardType; 
     </>
   );
 
-  const className = "group card flex h-full flex-col overflow-hidden transition duration-300 hover:-translate-y-1 hover:border-teal-100 hover:shadow-lift";
-  return <Link href={href} className={className}>{content}</Link>;
+  return (
+    <article className="card group flex h-full flex-col overflow-hidden transition duration-300 hover:-translate-y-1 hover:border-teal-100 hover:shadow-lift">
+      <Link href={href} className="flex flex-1 flex-col">{content}</Link>
+      <ListingPreferenceActions listing={listing} compact />
+    </article>
+  );
 }
 
 function InfoItem({

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireRole } from "@/lib/auth";
 import { extract_candidate_images } from "@/lib/candidateImages";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { get_listing_preference_stats } from "@/lib/listingPreferenceStats";
 import { importCandidateToListing } from "@/src/import/repository";
 import { processCrawlerListings } from "@/src/import/processCrawlerListings";
 
@@ -63,14 +64,20 @@ export async function getListingImportCandidateDetail(id: string) {
   if (error) throw new Error(error.message);
   if (!candidate) return null;
 
-  const { data: ingestion, error: ingestion_error } = await supabase
-    .from("ingestion_listings")
-    .select("*")
-    .eq("id", candidate.ingestion_listing_id)
-    .maybeSingle();
+  const listing_key = candidate.candidate_no
+    ? `C${String(candidate.candidate_no).padStart(4, "0")}`
+    : candidate.id;
+  const [{ data: ingestion, error: ingestion_error }, preference_stats] = await Promise.all([
+    supabase
+      .from("ingestion_listings")
+      .select("*")
+      .eq("id", candidate.ingestion_listing_id)
+      .maybeSingle(),
+    get_listing_preference_stats(listing_key)
+  ]);
   if (ingestion_error) throw new Error(ingestion_error.message);
 
-  return { candidate, ingestion };
+  return { candidate, ingestion, preference_stats };
 }
 
 export async function updateListingImportCandidate(candidate_id: string, formData: FormData) {

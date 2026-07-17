@@ -1,4 +1,5 @@
 export const LISTING_VISIBILITY_WINDOW_DAYS = 30;
+export const LISTING_SEARCH_QUERY_LIMIT = 500;
 
 export function get_listing_visibility_cutoff(reference_date = new Date()): string {
   return new Date(
